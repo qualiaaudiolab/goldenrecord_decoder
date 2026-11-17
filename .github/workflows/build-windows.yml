@@ -3,7 +3,8 @@
 #
 # On main, if no release exists yet for the version in src/grdecoder/__init__.py,
 # a GitHub Release (tag v<version>) is created with the zipped app attached -
-# the permanent download page. To publish a new version: raise __version__
+# the permanent download page - and all older releases are deleted, so the
+# Releases page only ever shows the current version. To publish a new version: raise __version__
 # (and the version in pyproject.toml) and merge to main.
 name: Build Windows app
 
@@ -81,4 +82,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) { Write-Host "Release $tag already exists - nothing to publish."; exit 0 }
           $zip = "GoldenRecordDecoder-$tag-windows.zip"
           Compress-Archive -Path dist/GoldenRecordDecoder -DestinationPath $zip
-          gh release create $tag $zip --target $env:GITHUB_SHA --title "Golden Record Decoder $tag" --notes-file packaging/RELEASE_NOTES.md
+          gh release create $tag $zip --target $env:GITHUB_SHA --title "Golden Record Decoder $tag" --notes-file packaging/RELEASE_NOTES.md --latest
+          # keep only the newest release: remove older releases and their tags
+          $old = gh release list --limit 100 --json tagName --jq ".[].tagName" | Where-Object { $_ -ne $tag }
+          foreach ($t in $old) { gh release delete $t --yes --cleanup-tag }

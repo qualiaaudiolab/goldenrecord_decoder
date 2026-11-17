@@ -13,4 +13,4 @@ Modules, in processing order:
     gui        graphical interface (PySide6 + pyqtgraph)
 """
 
-__version__ = "0.2.0"
+__version__ = "1.0.0"
