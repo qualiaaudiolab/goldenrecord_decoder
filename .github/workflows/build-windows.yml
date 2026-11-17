@@ -1,14 +1,15 @@
 # Builds the Windows app on every push to main, on pull requests, and on demand.
 # Result: Actions -> this workflow -> latest run -> Artifacts -> GoldenRecordDecoder-windows
 #
-# Pushing a version tag (v0.1.0, v0.2.0, ...) additionally publishes a GitHub
-# Release with the zipped app attached - the permanent download page.
+# On main, if no release exists yet for the version in src/grdecoder/__init__.py,
+# a GitHub Release (tag v<version>) is created with the zipped app attached -
+# the permanent download page. To publish a new version: raise __version__
+# (and the version in pyproject.toml) and merge to main.
 name: Build Windows app
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -58,12 +59,16 @@ jobs:
           name: GoldenRecordDecoder-windows
           path: dist/GoldenRecordDecoder/
 
-      - name: Publish release (version tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish release (main only, once per version)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $zip = "GoldenRecordDecoder-$env:GITHUB_REF_NAME-windows.zip"
+          $ver = python -c "import sys; sys.path.insert(0,'src'); import grdecoder; print(grdecoder.__version__)"
+          $tag = "v$ver"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { Write-Host "Release $tag already exists - nothing to publish."; exit 0 }
+          $zip = "GoldenRecordDecoder-$tag-windows.zip"
           Compress-Archive -Path dist/GoldenRecordDecoder -DestinationPath $zip
-          gh release create $env:GITHUB_REF_NAME $zip --title "Golden Record Decoder $env:GITHUB_REF_NAME" --notes-file packaging/RELEASE_NOTES.md
+          gh release create $tag $zip --target $env:GITHUB_SHA --title "Golden Record Decoder $tag" --notes-file packaging/RELEASE_NOTES.md
