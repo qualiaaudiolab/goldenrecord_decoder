@@ -341,8 +341,10 @@ class Decoder:
 
         def similar(p, q):
             a, b = edges[id(p)], edges[id(q)]
-            if p.channel != q.channel or a.shape != b.shape:
+            if p.channel != q.channel or min(a.shape[1], b.shape[1]) < 400:
                 return False
+            h, w = min(a.shape[0], b.shape[0]), min(a.shape[1], b.shape[1])  # lengths differ by a few lines
+            a, b = a[:h, :w], b[:h, :w]
             xc = np.real(np.fft.ifft2(np.fft.fft2(a) * np.conj(np.fft.fft2(b)))) / a.size
             dy, dx = np.r_[0:5, -4:0], np.r_[0:13, -12:0]
             return xc[np.ix_(dy % a.shape[0], dx % a.shape[1])].max() > threshold
