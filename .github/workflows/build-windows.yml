@@ -1,0 +1,46 @@
+# Builds the Windows app on every push to main, on pull requests, and on demand.
+# Result: Actions -> this workflow -> latest run -> Artifacts -> GoldenRecordDecoder-windows
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test] pyinstaller
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Build
+        run: >
+          pyinstaller --noconfirm --clean --windowed
+          --name GoldenRecordDecoder
+          --collect-data soundfile --collect-binaries soundfile
+          --collect-submodules pyqtgraph
+          --paths src
+          packaging/launch.py
+
+      - name: Smoke test (CLI on synthetic data)
+        run: |
+          python -c "import sys; sys.path[:0]=['tests']; import soundfile as sf; from synthetic import make_recording; y,t=make_recording(); sf.write('synthetic.wav', y, t['fs'], subtype='FLOAT')"
+          grdecoder decode synthetic.wav --out smoke
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GoldenRecordDecoder-windows
+          path: dist/GoldenRecordDecoder/

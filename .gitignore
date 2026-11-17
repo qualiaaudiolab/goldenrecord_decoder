@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+*.spec.bak
+.pytest_cache/
+# audio and decoded output stay local
+*.wav
+*.flac
+*.aif
+*.aiff
+decoded/
