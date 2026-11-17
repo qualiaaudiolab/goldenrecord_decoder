@@ -53,10 +53,15 @@ Voyager Golden Record reissue.
 
 ### Windows, ready-made program
 
-Every push to `main` builds a Windows version automatically (GitHub →
-*Actions* → *Build Windows app* → latest run → *Artifacts* →
-`GoldenRecordDecoder-windows`). Unzip it and run `GoldenRecordDecoder.exe`.
-Python is not needed.
+1. Open the **[Releases](../../releases)** page (right-hand side of the
+   repository's main page) and download `GoldenRecordDecoder-…-windows.zip`
+   from the newest release.
+2. Right-click the zip → **Extract All…** into a permanent folder.
+3. Run `GoldenRecordDecoder.exe` (keep the `_internal` folder next to it).
+   Windows may warn that the program is unsigned: **More info → Run anyway**.
+
+Python is not needed. Development builds of every change are also available
+under *Actions → Build Windows app → (run) → Artifacts* for 90 days.
 
 ### From source (Windows, macOS, Linux)
 
