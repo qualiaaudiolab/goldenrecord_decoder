@@ -40,6 +40,9 @@ jobs:
           --name GoldenRecordDecoder
           --collect-data soundfile --collect-binaries soundfile
           --collect-submodules pyqtgraph
+          --hidden-import sounddevice
+          --icon packaging/icon.ico
+          --add-data "src/grdecoder/gui/icon.png;grdecoder/gui"
           --paths src
           packaging/launch.py
 
@@ -53,6 +56,13 @@ jobs:
         run: |
           $p = Start-Process dist/GoldenRecordDecoder/GoldenRecordDecoder.exe -ArgumentList "decode","synthetic.wav","--out","smoke_exe" -Wait -PassThru
           if ($p.ExitCode -ne 0 -or -not (Test-Path smoke_exe/L001.png)) { Write-Error "exe decode failed (exit $($p.ExitCode))"; exit 1 }
+
+      - name: Self-test of the built .exe (all components load, incl. audio)
+        shell: pwsh
+        run: |
+          $p = Start-Process dist/GoldenRecordDecoder/GoldenRecordDecoder.exe -ArgumentList "selftest","--out","selftest.json" -Wait -PassThru
+          Get-Content selftest.json
+          if ($p.ExitCode -ne 0) { Write-Error "selftest failed"; exit 1 }
 
       - uses: actions/upload-artifact@v4
         with:

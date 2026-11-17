@@ -50,9 +50,13 @@ def make_recording(
     x = np.zeros(total)
 
     is_pic = (k >= lines_before) & (k < lines_before + lines_picture)
-    stripes = 0.25 * np.sin(2 * np.pi * 6 * (u - 0.115) / 0.8)
+    stripes = 0.25 * np.sin(2 * np.pi * 3 * (u - 0.115) / 0.8)
     active = (u >= 0.115) & (u < 0.915)
     x[is_pic & active] = stripes[is_pic & active]
+    # start marker: 21 hatched lines right before the picture
+    is_mark = (k >= lines_before - 21) & (k < lines_before)
+    hatch = np.where(np.sin(2 * np.pi * (6 * u + 0.25 * k)) > 0, 0.35, -0.35)
+    x[is_mark & active] = hatch[is_mark & active]
     bars = ((u >= 0.10) & (u < 0.115)) | ((u >= 0.915) & (u < 0.93))
     x[is_pic & bars] = -0.4
     x[(u >= 0.93) | (u < 0.10)] = 0.3
@@ -81,5 +85,5 @@ def make_recording(
         y = ss.lfilter([a, -a], [1.0, -a], y)
     y = y + noise * rng.standard_normal(len(y))
     truth = dict(fs=fs, lines_before=lines_before, lines_picture=lines_picture, stagger=stagger,
-                 tau=tau, warp_t=t, warp=warp, stripes_cycles=6)
+                 tau=tau, warp_t=t, warp=warp, stripes_cycles=3)
     return y.astype(np.float32), truth

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .pipeline import DecodeSettings, Decoder, save_png
+from .pipeline import DecodeSettings, Decoder, display_width, save_png
 from .render import auto_levels, combine_colour, resize_columns, tone_map
 
 
@@ -29,6 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command")
 
     sub.add_parser("gui", help="start the graphical interface (default)")
+
+    t = sub.add_parser("selftest", help="check that all components load (writes a JSON report)")
+    t.add_argument("--out", type=Path, default=Path("grdecoder_selftest.json"))
 
     d = sub.add_parser("decode", help="decode all pictures of a recording to PNG files")
     d.add_argument("wav", type=Path, help="recording of the picture section (any rate, mono or stereo)")
@@ -92,7 +95,7 @@ def decode(args) -> int:
             rgb, shifts = combine_colour(*imgs)
             lo, hi = auto_levels(rgb, st.black_pct, st.white_pct)
             rgb = tone_map(rgb, lo, hi, st.gamma, st.invert)
-            width = int(round(st.height * st.aspect))
+            width = display_width(st, rgb.shape[1])
             name = f"{a.name}-{c.name}_colour.png"
             save_png(resize_columns(rgb, width), out / name, bits=8)
             print(f"  colour: {a.name}+{b.name}+{c.name} (R,G,B order assumed) -> {name}")
@@ -106,6 +109,32 @@ def decode(args) -> int:
     return 0
 
 
+def selftest(args) -> int:
+    """Import every component and record what works (used by the Windows build check)."""
+    import json
+    import platform
+
+    report = {"python": platform.python_version(), "platform": platform.platform()}
+
+    def check(name, fn):
+        try:
+            report[name] = fn()
+        except Exception as ex:  # record, do not stop
+            report[name] = f"ERROR: {ex!r}"
+
+    check("numpy", lambda: __import__("numpy").__version__)
+    check("scipy", lambda: __import__("scipy").__version__)
+    check("soundfile", lambda: __import__("soundfile").__libsndfile_version__)
+    check("qt", lambda: __import__("PySide6.QtWidgets", fromlist=["x"]) and __import__("PySide6").__version__)
+    check("pyqtgraph", lambda: __import__("pyqtgraph").__version__)
+    check("sounddevice", lambda: __import__("sounddevice").get_portaudio_version()[1])
+    check("audio_outputs", lambda: sum(1 for d in __import__("sounddevice").query_devices()
+                                       if d["max_output_channels"] > 0))
+    args.out.write_text(json.dumps(report, indent=2))
+    print(json.dumps(report, indent=2))
+    return 0 if not any(str(v).startswith("ERROR") for k, v in report.items() if k != "audio_outputs") else 1
+
+
 def main(argv=None) -> int:
     # a windowed .exe has no console: give print() somewhere harmless to write
     if sys.stdout is None:
@@ -114,13 +143,15 @@ def main(argv=None) -> int:
         sys.stderr = open(os.devnull, "w")
     argv = sys.argv[1:] if argv is None else list(argv)
     # anything that is not a sub-command (e.g. a file dropped onto the app) -> GUI
-    if argv and argv[0] not in ("gui", "decode", "-h", "--help"):
+    if argv and argv[0] not in ("gui", "decode", "selftest", "-h", "--help"):
         from .gui.app import run
 
         return run([sys.argv[0], *argv])
     args = build_parser().parse_args(argv)
     if args.command == "decode":
         return decode(args)
+    if args.command == "selftest":
+        return selftest(args)
     from .gui.app import run  # imported lazily: the CLI must work without Qt
 
     return run([sys.argv[0]])

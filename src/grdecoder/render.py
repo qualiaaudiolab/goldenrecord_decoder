@@ -235,6 +235,10 @@ def combine_colour(r: np.ndarray, g: np.ndarray, b: np.ndarray, max_shift: int =
     +-`max_shift`) that maximises the cross-correlation of their edge images,
     computed with FFTs. Returns (rgb float image, [(dy, dx) applied to g, b]).
     """
+    # frames can differ by a few lines in length: crop to the common size
+    h = min(x.shape[0] for x in (r, g, b))
+    w = min(x.shape[1] for x in (r, g, b))
+    r, g, b = r[:h, :w], g[:h, :w], b[:h, :w]
     er = _edges(r)
     out, shifts = [r], []
     for ch in (g, b):
@@ -264,8 +268,8 @@ def measure_circle_aspect(img: np.ndarray) -> tuple[float, dict]:
     recipient can check the decoding. Here it calibrates the picture
     geometry: we find the ring's top/bottom (average of the central
     columns) and left/right (average of the central rows), and return the
-    width/height ratio at which its horizontal and vertical diameters are
-    equal on screen. `img` is the un-tone-mapped picture (rows, lines).
+    width/height ratio (for 512 lines) at which its horizontal and vertical
+    diameters are equal on screen. `img` is the un-tone-mapped picture (rows, lines).
     """
     import scipy.signal as ss
 
@@ -286,5 +290,5 @@ def measure_circle_aspect(img: np.ndarray) -> tuple[float, dict]:
         raise ValueError("No ring found in the central rows.")
     x0, x1 = sorted(pk[np.argsort(row[pk])[-2:]])
     ry, rx = (y1 - y0) / 2, (x1 - x0) / 2
-    aspect = (ry / h) / (rx / w)
+    aspect = (ry / h) / (rx / 512)  # aspect is defined for a width of 512 lines
     return float(aspect), {"rows": (int(y0), int(y1)), "lines": (int(x0), int(x1))}
