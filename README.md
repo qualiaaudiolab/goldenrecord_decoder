@@ -141,6 +141,13 @@ docs/           how it works, images
 
 Run the tests with `pip install pytest` and then `python -m pytest`.
 
+## Licence
+
+The decoder's code is released under the [MIT licence](LICENSE): anyone may
+use, modify and share it, including in other projects, as long as the
+copyright notice is kept. It covers the code only. The recording and the
+pictures belong to their owners and are not part of this repository.
+
 ## Credits
 
 * Qualia Audio Lab — project, analysis and testing.

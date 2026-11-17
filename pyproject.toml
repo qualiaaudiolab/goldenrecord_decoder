@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grdecoder"
-version = "0.2.0"
+version = "1.0.0"
 description = "Decoder for the pictures of the Voyager Golden Record, with sync-locked wow/flutter correction"
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
