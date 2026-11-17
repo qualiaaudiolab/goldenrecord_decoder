@@ -98,7 +98,7 @@ def decode(args) -> int:
             width = display_width(st, rgb.shape[1])
             name = f"{a.name}-{c.name}_colour.png"
             save_png(resize_columns(rgb, width), out / name, bits=8)
-            print(f"  colour: {a.name}+{b.name}+{c.name} (R,G,B order assumed) -> {name}")
+            print(f"  colour: {a.name}+{b.name}+{c.name} (R, G, B) -> {name}")
 
     with open(out / "report.csv", "w", newline="") as f:
         w = csv.writer(f)

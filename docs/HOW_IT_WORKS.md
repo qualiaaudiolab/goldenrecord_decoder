@@ -200,12 +200,11 @@ settings (`render.measure_circle_aspect`).
 same scene, one after another. The decoder flags candidates by comparing
 blurred edge maps of neighbouring pictures (separations share edges but not
 brightness) and registers the three frames to each other before combining
-them. The order of the colours in the triple is **not documented**; the
-default R, G, B is an assumption, and the app lets you try all six orders.
-The solar spectrum (three frames in which a bright band moves across) cannot
-be detected this way, because its separations differ in content; combine it
-by hand. If the orientation of the spectrum in the original picture is
-known, it would settle the colour order.
+them. Colour pictures were recorded as red, green and blue frames, in that order
+(the decoder's default; the app still lets you try the other orders). The
+solar spectrum (three frames in which a bright band moves across) cannot be
+detected this way, because its separations differ in content; combine it by
+hand.
 
 ## 6. The 76.8 kHz tone
 
@@ -230,7 +229,6 @@ It is not on the tape:
 
 ## 7. Open questions
 
-* **Colour order** of the separations (see §5).
 * **Why the fields are offset** by ~1.85 rows after destaggering, and
   whether the cover's interlace drawing intends a specific half-line shift.
 * **Droop model.** A single high-pass pole explains most of the low-frequency
@@ -240,3 +238,9 @@ It is not on the tape:
 
 Measurements and plots in this document can be reproduced with the
 command-line tool (`--timing-csv` writes per-line timing for every picture).
+
+---
+
+*This document and the decoder's code were written by Claude (Anthropic),
+working with Carlos Nascimento of Qualia Audio Lab, who directed the work and
+made the measurements and listening tests.*

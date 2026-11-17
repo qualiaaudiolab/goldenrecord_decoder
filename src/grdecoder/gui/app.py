@@ -396,7 +396,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.w_order = QtWidgets.QComboBox()
         self.w_order.addItems(COLOUR_ORDERS)
         self.w_order.setToolTip("Which colour each of the three frames carries (frame 1, 2, 3).\n"
-                                "The original order is not documented; RGB is an assumption.")
+                                "The record uses red, green, blue (RGB), the default.")
         self.w_order.currentIndexChanged.connect(self._redisplay)
         f.addRow("Frame order", self.w_order)
         hint = QtWidgets.QLabel("Pictures marked ◆ look like colour separations.")
