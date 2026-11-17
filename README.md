@@ -91,7 +91,12 @@ grdecoder                      # start the app
    (fixed speed, no corrections), for comparison.
 4. Click anywhere in the picture to see that line in the **line scope**: the
    raw signal, the part used as picture (blue) and the clamp reference (gold).
-5. **Export picture** saves a 16-bit PNG with square pixels. **Export all…**
+5. **▶ Play** (or the space bar) plays the recording from the selected
+   picture. You hear the signal (both channels, resampled to 48 kHz for
+   the sound card) while the picture is drawn line by line in step with it,
+   and the line scope follows along. At the end of a picture, playback
+   moves on to the next one on the same channel.
+6. **Export picture** saves a 16-bit PNG with square pixels. **Export all…**
    saves every picture plus a per-line timing CSV for each.
 
 | Setting | What it does |
@@ -103,7 +108,7 @@ grdecoder                      # start the app
 | Droop correction, time constant | undo the low-frequency loss; *auto* measures it per picture |
 | Line clamp | remove line-to-line level jumps (vertical streaks) |
 | Invert | on this recording a higher signal means darker (default on) |
-| Active window, Rows, Aspect, Margin lines | picture geometry; *Calibrate aspect from circle* uses picture 1 |
+| Active window, Rows, Aspect, Margin lines | picture geometry (aspect is width/height for 512 lines); *Calibrate aspect from circle* uses picture 1 |
 | Combine with next two, Frame order | view three pictures as a colour picture |
 
 ## Command line

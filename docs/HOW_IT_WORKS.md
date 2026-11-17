@@ -32,8 +32,9 @@ What the master tape actually carries:
 | Property | Measured | Notes |
 |---|---|---|
 | Line period | 8.320–8.327 ms (3195–3197 samples at 384 kHz) | 1/120 s = 8.333 ms is our speed reference (§3) |
-| Lines per picture | 512 | as on the cover |
-| Picture duration | 4.27 s | plus ~100 framing lines before, blank lines after |
+| Lines per picture | 512 on the cover; the framed area is 530–541 lines | the decoder keeps the whole framed area (max. 540) |
+| Start marker | ~21 lines of diagonal hatching right before every picture | the precise anchor for the picture's first line |
+| Picture duration | ~4.45 s | plus ~80 framing lines before, blank lines after |
 | Pictures | one after another on **each** channel independently | the two channels carry different pictures |
 | Sync pulse | very sharp positive spike at the start of each line | the steepest edge in the whole signal |
 | Sync stagger | pulses alternately early/late by **±130.7 µs** (±50 samples, ~1.6 % of a line) | the "staggered interlace" drawn on the cover |
@@ -77,7 +78,7 @@ WAV ──► find candidates ──► line period ──► sync template ─�
 | Template | `sync.build_template` | median shape of genuine, staggered sync pulses (±1 % of a line around the spike, where both pulse types agree) |
 | Measure | `sync.refine` | normalised cross-correlation with the template; parabolic peak interpolation gives sub-sample position; the correlation (0–1) rejects picture edges |
 | Track | `sync.track_lines`, `sync.merge_runs` | follows the line rhythm, predicts the next pulse from the interval two back (same stagger parity), bridges up to 4 missing pulses, joins runs broken by longer dropouts if the stagger pattern continues |
-| Find pictures | `pictures.py` | compares the edges in the blanking part of every line with the median of its own parity; picture lines share the framing structure, other lines do not; 512 lines are placed on the matching stretch |
+| Find pictures | `pictures.py` | compares the edges in the blanking part of every line with the median of its own parity (picture lines share the framing structure, other lines do not); the picture starts on the line right after the hatched start marker and runs to the end of the matching stretch |
 | Render | `pipeline.Decoder.render`, `render.py` | the steps described below |
 
 Analysis of the 90 s excerpt (both channels) takes ~6 s; rendering one
@@ -189,7 +190,9 @@ drawings are dark on white. Inversion is the default.
 
 **Aspect ratio.** Picture 1 is a circle, also drawn on the cover, so that the
 decoding can be checked. With the default active window (0.115–0.915 of a
-line), the circle is round at a display aspect of **1.485** (width / height).
+line), the circle is round at a display aspect of **1.485** (width / height,
+defined for a width of 512 lines; pictures with more lines get proportionally
+wider).
 "Calibrate aspect from circle" in the app measures it again for other
 settings (`render.measure_circle_aspect`).
 

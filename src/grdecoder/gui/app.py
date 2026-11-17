@@ -26,9 +26,10 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .. import __version__
-from ..pipeline import BACK_PORCH, DecodeSettings, Decoder, Picture, Rendered, save_png
+from ..pipeline import BACK_PORCH, LINES_PER_PICTURE, DecodeSettings, Decoder, Picture, Rendered, display_width, save_png
 from ..render import auto_levels, combine_colour, measure_circle_aspect, resize_columns, tone_map
 from . import theme
+from .playback import Player
 
 pg.setConfigOptions(imageAxisOrder="row-major", antialias=True,
                     background=theme.PANEL, foreground=theme.TEXT_DIM)
@@ -62,18 +63,27 @@ class Task(QtCore.QRunnable):
         self.cancelled = False
 
     def progress(self, f: float, msg: str = "") -> None:
-        self.signals.progress.emit(float(f), msg)
+        try:
+            self.signals.progress.emit(float(f), msg)
+        except RuntimeError:  # window closed
+            pass
 
     def emit_item(self, obj) -> None:
-        self.signals.item.emit(obj)
+        try:
+            self.signals.item.emit(obj)
+        except RuntimeError:  # window closed
+            pass
 
     def run(self) -> None:
         try:
-            res = self.fn(*self.args, task=self)
-        except Exception:  # report any failure to the GUI instead of dying silently
-            self.signals.failed.emit(traceback.format_exc())
-        else:
-            self.signals.done.emit(res)
+            try:
+                res = self.fn(*self.args, task=self)
+            except Exception:  # report any failure to the GUI instead of dying silently
+                self.signals.failed.emit(traceback.format_exc())
+            else:
+                self.signals.done.emit(res)
+        except RuntimeError:
+            pass  # the window was closed while this task was still running
 
 
 # ==========================================================================
@@ -110,7 +120,10 @@ def styled_plot(ylabel: str, xlabel: str) -> pg.PlotWidget:
 
 
 def app_icon() -> QtGui.QIcon:
-    """A small golden disc with grooves, drawn in code (no image files needed)."""
+    """The record cover (icon.png next to this file), or a drawn golden disc."""
+    png = Path(__file__).with_name("icon.png")
+    if png.exists():
+        return QtGui.QIcon(str(png))
     pm = QtGui.QPixmap(64, 64)
     pm.fill(QtCore.Qt.transparent)
     p = QtGui.QPainter(pm)
@@ -118,14 +131,6 @@ def app_icon() -> QtGui.QIcon:
     p.setBrush(QtGui.QColor(theme.ACCENT))
     p.setPen(QtCore.Qt.NoPen)
     p.drawEllipse(2, 2, 60, 60)
-    pen = QtGui.QPen(QtGui.QColor("#9a7a34"))
-    pen.setWidthF(1.2)
-    p.setPen(pen)
-    p.setBrush(QtCore.Qt.NoBrush)
-    for r in range(8, 29, 4):
-        p.drawEllipse(QtCore.QPointF(32, 32), r, r)
-    p.setBrush(QtGui.QColor(theme.BG))
-    p.drawEllipse(QtCore.QPointF(32, 32), 4, 4)
     p.end()
     return QtGui.QIcon(pm)
 
@@ -164,6 +169,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._render_timer = QtCore.QTimer(self, singleShot=True, interval=120)
         self._render_timer.timeout.connect(self._start_render)
         self._qsettings = QtCore.QSettings("QualiaAudioLab", "GoldenRecordDecoder")
+
+        # real-time playback
+        self.player: Player | None = None
+        self._play_timer = QtCore.QTimer(self, interval=33)
+        self._play_timer.timeout.connect(self._play_tick)
+        self._reveal: int | None = None          # columns shown while playing (None = all)
+        self._col_times: np.ndarray | None = None  # file time (s) of each column's line start
+        self._disp_full: np.ndarray | None = None  # the picture as displayed, before reveal
+        self._tick = 0
 
         self._build_toolbar()
         self._build_centre()
@@ -212,6 +226,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_compare.setToolTip("Show the same picture decoded the plain way:\n"
                                     "fixed speed, no stagger/field/droop/clamp correction.")
         self.act_compare.toggled.connect(lambda _: self.schedule_render())
+        tb.addSeparator()
+        self.act_play = tb.addAction("▶  Play")
+        self.act_play.setCheckable(True)
+        self.act_play.setShortcut(QtGui.QKeySequence(QtCore.Qt.Key_Space))
+        self.act_play.setToolTip("Play the recording from the selected picture. The picture is drawn\n"
+                                 "line by line in step with the sound, and playback moves on to the\n"
+                                 "next picture of the channel by itself. (Space)")
+        self.act_play.toggled.connect(self._play_toggled)
+        self.w_volume = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.w_volume.setRange(0, 100)
+        self.w_volume.setValue(int(self._qsettings.value("volume", 40)))
+        self.w_volume.setFixedWidth(90)
+        self.w_volume.setToolTip("Playback volume")
+        self.w_volume.valueChanged.connect(self._volume_changed)
+        tb.addWidget(self.w_volume)
         self.file_label = QtWidgets.QLabel("no file — open a recording of the picture section (WAV/FLAC)")
         self.file_label.setObjectName("fileinfo")
         tb.addWidget(self.file_label)
@@ -425,7 +454,7 @@ class MainWindow(QtWidgets.QMainWindow):
         sb.showMessage(f"v{__version__} · ready")
 
     def _set_enabled(self, on: bool):
-        for a in (self.act_export, self.act_export_all, self.act_csv, self.act_compare):
+        for a in (self.act_export, self.act_export_all, self.act_csv, self.act_compare, self.act_play):
             a.setEnabled(on)
         self.btn_colour.setEnabled(on)
         self.btn_circle.setEnabled(on)
@@ -531,6 +560,8 @@ class MainWindow(QtWidgets.QMainWindow):
         info = dec.source.info
         self.file_label.setText(f"{info.path.name}   ·   {info.samplerate / 1000:g} kHz   ·   "
                                 f"{info.channels} ch   ·   {info.duration:.1f} s   ·   {info.subtype}")
+        self.act_play.setChecked(False)
+        self.player = None
         self.decoder = None
         self.current = None
         self.pic_list.clear()
@@ -639,6 +670,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.btn_colour.setChecked(False)
             self.btn_colour.blockSignals(False)
             self.colour = None
+        if self.act_play.isChecked() and self.player:
+            self.player.start(self.current.t_start - 0.25)
+            self._reveal = 0
         self.schedule_render(reset_view=True)
 
     # ----------------------------------------------------------- rendering
@@ -675,6 +709,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if seq != self._render_seq:
             return  # a newer request is on its way
         self.rendered = rendered[0]
+        r0 = self.rendered
+        self._col_times = r0.timebase(np.arange(r0.lines.start, r0.lines.stop, dtype=float)) / r0.fs
         # colour: register frames 2 and 3 to frame 1 once per render
         self.colour_frames = combine_colour(*[x.image for x in rendered])[0] if len(rendered) == 3 else None
         self._redisplay()
@@ -706,9 +742,10 @@ class MainWindow(QtWidgets.QMainWindow):
         img = self.display_image()
         if img is None:
             return
-        self.image_item.setImage(img, levels=(0, 1), autoLevels=False)
+        self._disp_full = img
+        self._apply_reveal()
         h, w = img.shape[:2]
-        sx = self.st.height * self.st.aspect / w  # make pixels the right shape
+        sx = self.st.height * self.st.aspect / LINES_PER_PICTURE  # make pixels the right shape
         self.image_item.setTransform(QtGui.QTransform.fromScale(sx, self.st.height / h))
         self._sx = sx
         p = self.current
@@ -719,6 +756,89 @@ class MainWindow(QtWidgets.QMainWindow):
         col = f"   ·   colour {'+'.join(x.name for x in self.colour)} ({self.w_order.currentText()})" if self.colour else ""
         self.caption.setText(f"{p.name}   ·   {'left' if p.channel == 0 else 'right'} channel   ·   "
                              f"{p.t_start:.3f}–{p.t_end:.3f} s   ·   {mode}{col}")
+
+    def _apply_reveal(self):
+        """Show the picture, blanking the columns not yet reached by playback."""
+        img = self._disp_full
+        if img is None:
+            return
+        if self._reveal is not None:
+            img = img.copy()
+            img[:, max(0, min(self._reveal, img.shape[1])) :] = 0.04
+        self.image_item.setImage(img, levels=(0, 1), autoLevels=False)
+
+    # ----------------------------------------------------------- playback
+    def _volume_changed(self, v: int):
+        self._qsettings.setValue("volume", v)
+        if self.player:
+            self.player.volume = v / 100
+
+    def _play_toggled(self, on: bool):
+        if on:
+            if not (self.decoder and self.current):
+                self.act_play.setChecked(False)
+                return
+            if self.colour:  # playback follows single pictures
+                self.btn_colour.setChecked(False)
+            if self.player is None:
+                self.player = Player(self.decoder.source)
+            self.player.volume = self.w_volume.value() / 100
+            self.player.start(self.current.t_start - 0.25)
+            self._reveal = 0
+            self._play_timer.start()
+            self.act_play.setText("■  Stop")
+            if not self.player.audio_ok:
+                self.statusBar().showMessage(f"no sound output ({self.player.error}) — playing silently")
+        else:
+            self._play_timer.stop()
+            if self.player:
+                self.player.stop()
+            self._reveal = None
+            self.act_play.setText("▶  Play")
+            self.line_marker.setVisible(False)
+            self._apply_reveal()
+
+    def _play_tick(self):
+        if not (self.player and self.current and self.decoder):
+            return
+        t = self.player.position()
+        p = self.current
+        if t > p.t_end:
+            # move on to the next picture of this channel when it begins
+            nxt = [q for q in self.decoder.pictures if q.channel == p.channel and q.t_start > p.t_start]
+            if not nxt:
+                if t > p.t_end + 1.0 or t > self.decoder.source.info.duration:
+                    self.act_play.setChecked(False)
+                return
+            if t >= nxt[0].t_start - 0.2:
+                self.current = nxt[0]
+                self._select_in_list(nxt[0])
+                self.pic_list.scrollToItem(self.pic_list.currentItem())
+                self._reveal = 0
+                self.schedule_render(reset_view=True)
+                return
+        r = self.rendered
+        if r is None or r.picture is not self.current or self._col_times is None:
+            return
+        col = int(np.searchsorted(self._col_times, t))
+        if col != self._reveal:
+            self._reveal = col
+            self._apply_reveal()
+        n = len(self._col_times)
+        if 0 <= col < n:
+            self.line_marker.setPos((col + 0.5) * getattr(self, "_sx", 1.0))
+            self.line_marker.setVisible(True)
+            self._tick += 1
+            if self._tick % 4 == 0:  # live line scope, ~8 updates per second
+                self.selected_line = r.lines.start + col
+                self._update_scope()
+        line = col - (r.picture.first_line - r.lines.start)
+        self.statusBar().showMessage(f"▶ {t:8.2f} s   ·   {p.name}   ·   line {max(0, min(line, n))}")
+
+    def closeEvent(self, e):
+        if self.player:
+            self.player.stop()
+        super().closeEvent(e)
 
     # ----------------------------------------------------------- readouts
     def _update_readouts(self):
@@ -841,7 +961,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------------------- export
     def _export_image(self) -> np.ndarray:
         img = self.display_image()
-        return resize_columns(img, int(round(self.st.height * self.st.aspect)))
+        return resize_columns(img, display_width(self.st, img.shape[1]))
 
     def export_current(self):
         if self.rendered is None:

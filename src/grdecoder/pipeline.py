@@ -21,7 +21,7 @@ import numpy as np
 
 from . import sync
 from .audio import AudioSource
-from .pictures import place_picture, find_picture_blocks, line_profiles, picture_mask
+from .pictures import LINES_PER_PICTURE, find_start_marker, hatch_score, place_picture, find_picture_blocks, line_profiles, picture_mask
 from .render import (auto_levels, droop_correct, equalise_fields, estimate_droop_tau, measure_field_offset,
                      resize_columns,
                      sample_picture, tone_map)
@@ -32,6 +32,10 @@ from .timebase import Timebase, build_timebase, destagger
 # 120 Hz = twice the 60 Hz US mains / TV field rate the 1977 equipment was
 # almost certainly locked to. We use 1/120 s as the speed reference.
 NOMINAL_LINE_S = 1.0 / 120.0
+
+# Lines kept per picture: from the start marker to the end of the framed area
+# (measured 530-541 on the master tape, a few outliers up to 555).
+MAX_PICTURE_LINES = 540
 
 # Part of every line used as black-level reference: the flat stretch after
 # the sync pulse and before the picture ("back porch"), as fractions of a line.
@@ -60,8 +64,8 @@ class DecodeSettings:
     top: float = 0.115              # active picture window inside a line (fractions)
     bottom: float = 0.915
     height: int = 768               # output rows
-    margin_lines: int = 8           # extra lines drawn left/right of the 512 (never crop content)
-    aspect: float = 1.485           # display width / height; 1.485 makes picture 1 (the circle) round
+    margin_lines: int = 0           # extra lines drawn left/right of the 512 picture lines
+    aspect: float = 1.485           # display width/height of 512 lines; 1.485 makes picture 1 (the circle) round
     # tone
     invert: bool = True             # higher signal = darker on this recording (sun, planets come out right)
     gamma: float = 1.0
@@ -221,7 +225,9 @@ class Decoder:
             x = self.source.read(ch, a, int(ds.times[-1] + 2 * P))
             prof = line_profiles(x, a, ds.times, P)
             sim = picture_mask(prof)
+            hatch = hatch_score(prof)
             run.meta["similarity"] = sim
+            run.meta["hatch"] = hatch
             run.meta["stagger"] = ds.stagger
             # picture lines always carry the staggered sync (~1.6 % of a line);
             # runs without it are lead-in / test signals, not pictures
@@ -229,6 +235,14 @@ class Decoder:
                 continue
             for blk in find_picture_blocks(sim):
                 first, nl = place_picture(blk, sim)
+                # precise anchor: the picture starts right after the hatched start
+                # marker. The framed area then runs ~535 lines (the cover's 512
+                # plus a border); keep all of it up to the end of the block.
+                end = find_start_marker(hatch, blk[0])
+                if end is not None and end + 1 + LINES_PER_PICTURE // 2 <= len(run):
+                    first = end + 1
+                    nl = int(np.clip(blk[1] - first, LINES_PER_PICTURE, MAX_PICTURE_LINES))
+                    nl = min(nl, len(run) - first)
                 n += 1
                 m = run.measured[first : first + nl]
                 self.pictures.append(Picture(
@@ -346,8 +360,7 @@ class Decoder:
     def export_png(self, r: Rendered, path: str | Path, bits: int = 16) -> Path:
         """Save a rendered picture with square pixels at the settings' aspect."""
         img = r.display()
-        width = int(round(r.settings.height * r.settings.aspect))
-        return save_png(resize_columns(img, width), path, bits)
+        return save_png(resize_columns(img, display_width(r.settings, img.shape[1])), path, bits)
 
     def export_timing_csv(self, r: Rendered, path: str | Path) -> Path:
         """Per-line timing data of a rendered picture (for analysis elsewhere)."""
@@ -365,6 +378,11 @@ class Decoder:
                             f"{tb.error_raw[k] / r.fs * 1e6:.3f}", f"{tb.error_used[k] / r.fs * 1e6:.3f}",
                             f"{speed[k]:.1f}"])
         return path
+
+
+def display_width(st: DecodeSettings, n_columns: int) -> int:
+    """Pixel width that gives square pixels: `aspect` is defined for 512 lines."""
+    return int(round(st.height * st.aspect * n_columns / LINES_PER_PICTURE))
 
 
 def save_png(img: np.ndarray, path: str | Path, bits: int = 16) -> Path:

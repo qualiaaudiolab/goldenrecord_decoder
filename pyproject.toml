@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grdecoder"
-version = "0.1.0"
+version = "0.2.0"
 description = "Decoder for the pictures of the Voyager Golden Record, with sync-locked wow/flutter correction"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,7 @@ dependencies = [
     "Pillow>=10",
     "PySide6>=6.5",
     "pyqtgraph>=0.13.3",
+    "sounddevice>=0.4.6",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +26,9 @@ grdecoder = "grdecoder.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+grdecoder = ["gui/icon.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
