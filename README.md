@@ -1,5 +1,10 @@
 # Golden Record Decoder
 
+> **Written by Claude.** All of the code and documentation in this repository
+> was written by Claude, Anthropic's AI model. Carlos Nascimento (Qualia Audio
+> Lab) defined what the decoder should do, made the measurements and listening
+> tests, and checked the results.
+
 Decodes the 116 pictures of the **Voyager Golden Record** from a recording of
 its picture section, and corrects the analogue faults of the recording on the
 way: wow and flutter, low-frequency loss ("droop"), line-to-line level
@@ -150,7 +155,8 @@ pictures belong to their owners and are not part of this repository.
 
 ## Credits
 
-* Qualia Audio Lab — project, analysis and testing.
+* Claude (Anthropic) — all code and documentation.
+* Carlos Nascimento, Qualia Audio Lab — idea, specification, analysis and testing.
 * Ozma Records (David Pescovitz, Timothy Daly) — master-tape transfer of the picture data.
 * Ron Barry — first public decoding write-up (2017), which made the image data widely known.
 * Frank Drake, Valentin Boriakoff and Colorado Video Inc. — the 1977 picture encoding.
