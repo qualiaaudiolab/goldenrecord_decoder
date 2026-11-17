@@ -1,0 +1,74 @@
+# Builds the Windows app on every push to main, on pull requests, and on demand.
+# Result: Actions -> this workflow -> latest run -> Artifacts -> GoldenRecordDecoder-windows
+#
+# On main, if no release exists yet for the version in src/grdecoder/__init__.py,
+# a GitHub Release (tag v<version>) is created with the zipped app attached -
+# the permanent download page. To publish a new version: raise __version__
+# (and the version in pyproject.toml) and merge to main.
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create releases
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test] pyinstaller
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Build
+        run: >
+          pyinstaller --noconfirm --clean --windowed
+          --name GoldenRecordDecoder
+          --collect-data soundfile --collect-binaries soundfile
+          --collect-submodules pyqtgraph
+          --paths src
+          packaging/launch.py
+
+      - name: Smoke test (CLI on synthetic data)
+        run: |
+          python -c "import sys; sys.path[:0]=['tests']; import soundfile as sf; from synthetic import make_recording; y,t=make_recording(); sf.write('synthetic.wav', y, t['fs'], subtype='FLOAT')"
+          grdecoder decode synthetic.wav --out smoke
+
+      - name: Smoke test (the built .exe, headless)
+        shell: pwsh
+        run: |
+          $p = Start-Process dist/GoldenRecordDecoder/GoldenRecordDecoder.exe -ArgumentList "decode","synthetic.wav","--out","smoke_exe" -Wait -PassThru
+          if ($p.ExitCode -ne 0 -or -not (Test-Path smoke_exe/L001.png)) { Write-Error "exe decode failed (exit $($p.ExitCode))"; exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GoldenRecordDecoder-windows
+          path: dist/GoldenRecordDecoder/
+
+      - name: Publish release (main only, once per version)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = python -c "import sys; sys.path.insert(0,'src'); import grdecoder; print(grdecoder.__version__)"
+          $tag = "v$ver"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { Write-Host "Release $tag already exists - nothing to publish."; exit 0 }
+          $zip = "GoldenRecordDecoder-$tag-windows.zip"
+          Compress-Archive -Path dist/GoldenRecordDecoder -DestinationPath $zip
+          gh release create $tag $zip --target $env:GITHUB_SHA --title "Golden Record Decoder $tag" --notes-file packaging/RELEASE_NOTES.md
