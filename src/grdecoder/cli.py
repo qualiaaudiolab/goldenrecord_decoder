@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import sys
 import time
 from dataclasses import fields
@@ -106,6 +107,11 @@ def decode(args) -> int:
 
 
 def main(argv=None) -> int:
+    # a windowed .exe has no console: give print() somewhere harmless to write
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
     argv = sys.argv[1:] if argv is None else list(argv)
     # anything that is not a sub-command (e.g. a file dropped onto the app) -> GUI
     if argv and argv[0] not in ("gui", "decode", "-h", "--help"):
