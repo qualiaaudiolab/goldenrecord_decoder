@@ -169,6 +169,7 @@ pictures belong to their owners and are not part of this repository.
 
 * Claude (Anthropic) — all code and documentation.
 * Carlos Nascimento, Qualia Audio Lab — idea, specification, analysis and testing.
-* Ozma Records (David Pescovitz, Timothy Daly) — master-tape transfer of the picture data.
+* Ozma Records (David Pescovitz, Timothy Daly) — the 2017 transfer of the master reels (made at Sony Archives), which includes the picture data.
 * Ron Barry — first public decoding write-up (2017), which made the image data widely known.
 * Frank Drake, Valentin Boriakoff and Colorado Video Inc. — the 1977 picture encoding.
+* Jon Lomberg — design director of the Golden Record, including the calibration circle the decoder uses to set the aspect ratio.
