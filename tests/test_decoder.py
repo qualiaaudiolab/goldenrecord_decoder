@@ -152,3 +152,25 @@ def test_field_alignment(tmp_path, start):
     on = dec.render(p, DecodeSettings(field_align=True, field_level=False, droop=False))
     assert abs(measure_field_offset(off.image)) > 1.4
     assert abs(measure_field_offset(on.image)) < 0.3
+
+
+def test_circle_aspect_ignores_borders():
+    """The calibration-circle fit must find the ring, not the bright frame
+    edges, and return the aspect that makes it round."""
+    from grdecoder.render import measure_circle_aspect
+
+    h, w = 768, 535
+    true_aspect = 1.485
+    rows, lines = np.mgrid[0:h, 0:w].astype(float)
+    ry = 0.44 * h
+    rx = ry / h * 512 / true_aspect  # radius in lines that is round at true_aspect
+    r = np.hypot((lines - 267) / rx, (rows - 400) / ry)
+    img = 0.8 * np.exp(-((r - 1) / 0.008) ** 2)
+    img[:, :3] = 1.0  # bright frame edges on both sides
+    img[:, -3:] = 1.0
+    img[:, 200] += 0.3  # a vertical streak
+    img += 0.01 * np.random.default_rng(0).standard_normal(img.shape)
+    aspect, _ = measure_circle_aspect(img)
+    assert abs(aspect - true_aspect) < 0.01
+    with pytest.raises(ValueError):
+        measure_circle_aspect(0.01 * np.random.default_rng(1).standard_normal((h, w)))

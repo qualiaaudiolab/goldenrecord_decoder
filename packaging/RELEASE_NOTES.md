@@ -1,3 +1,7 @@
+## New in 1.1.2
+
+* **Calibrate aspect from circle** fixed. It mistook the bright edge of the framed area for the ring and set the aspect far too low, shrinking every picture. The ring is now found by fitting an ellipse to it, away from the frame edges, and the button refuses pictures that are not the circle. On the master tape it confirms the default, 1.485.
+
 ## New in 1.1.1
 
 * **Align fields** is now off by default and marked experimental. On the master tape the fields already line up once the sync stagger is removed; the automatic alignment was misled by a fine texture in the signal and made edges jagged (thanks to Carlos for spotting it on the calibration circle). It also used the wrong line parity on pictures that start on an odd line.
