@@ -60,9 +60,9 @@ this shows as fine vertical stripes and is equalised (`render.equalise_fields`).
 ## 2. Processing chain
 
 ```
-WAV ──► find candidates ──► line period ──► sync template ──► measure every pulse
-        (steep edges)       (2-line          (median pulse      (cross-correlation,
-                             distances)       shape, per ch)     sub-sample, score)
+WAV ──► find candidates ──► line period ──► learn templates ──► measure every pulse
+        (rising edges)      (2-line          (aligned fold,      (matched filter,
+                             distances)       one per field)      sub-sample, score)
                                                      │
         pictures ◄── picture finder ◄── line runs ◄──┘
         (512 lines)  (blanking structure) (flywheel tracker, dropout bridging)
@@ -73,16 +73,38 @@ WAV ──► find candidates ──► line period ──► sync template ─�
 
 | Step | Module | What it does |
 |---|---|---|
-| Candidates | `sync.find_candidates` | every edge whose slope is at least 30 % of the typical per-line maximum |
-| Line period | `sync.estimate_period` | histogram of distances to the candidate two lines later (stagger cancels); the picture rhythm is the one with the most staggered pulses (lead-in signals have other rhythms) |
-| Template | `sync.build_template` | median shape of genuine, staggered sync pulses (±1 % of a line around the spike, where both pulse types agree) |
-| Measure | `sync.refine` | normalised cross-correlation with the template; parabolic peak interpolation gives sub-sample position; the correlation (0–1) rejects picture edges |
+| Candidates | `sync.rising_edges`, `sync.find_candidates` | rising edges measured over *edge scale* (default 20 µs), kept if at least 30 % of the typical per-line maximum |
+| Line period | `sync.estimate_period` | histogram of distances to the candidate two lines later (the stagger cancels); a few best rhythms are kept as hypotheses |
+| Template | `sync.aligned_fold`, `sync.template_from_fold` | for each hypothesis, ~40 consecutive two-line stretches are aligned by cross-correlation and averaged. Picture content averages out and the sync structure remains; the fold with clear stagger and the sharpest edge wins. Two templates are cut from it, one per field, from 1 % of a line before the rising edge to *template length* (default 4 %) after it |
+| Measure | `sync.match`, `sync.detect` | normalised cross-correlation of the whole channel with both templates; peaks above *minimum match* (default 0.6) are refined to a fraction of a sample by parabolic interpolation. Below 150 kHz the signal is first upsampled to ~176 kHz |
 | Track | `sync.track_lines`, `sync.merge_runs` | follows the line rhythm, predicts the next pulse from the interval two back (same stagger parity), bridges up to 4 missing pulses, joins runs broken by longer dropouts if the stagger pattern continues |
 | Find pictures | `pictures.py` | compares the edges in the blanking part of every line with the median of its own parity (picture lines share the framing structure, other lines do not); the picture starts on the line right after the hatched start marker and runs to the end of the matching stretch |
 | Render | `pipeline.Decoder.render`, `render.py` | the steps described below |
 
-Analysis of the 90 s excerpt (both channels) takes ~6 s; rendering one
+Analysis of the 90 s excerpt (both channels) takes ~14 s; rendering one
 picture at 768 rows ~0.3 s.
+
+### Other sample rates and band-limited copies
+
+Version 1.0 measured each pulse with a short template (±1 % of a line)
+around the steepest point of the edge. At 384 kHz that is ample, but in a
+44.1 kHz or 20 kHz-limited copy the edge is smeared over more than that and
+picture edges look just as sync-like, so pictures were lost. Since 1.1 the
+templates are learned from the recording, are longer (4 % of a line, which
+includes the pulse's flat top or the beginning of the blanking that follows),
+and the tracker prefers runs of pulses that show the stagger. Measured on the
+90 s excerpt with default settings:
+
+| Copy | Pictures | Pulses predicted (not found) | Sync timing noise |
+|---|---|---|---|
+| 384 kHz master-tape transfer | 26 | ~0 % | 1.8 µs |
+| same, 20 kHz low-pass | 26 | ~0 % | 2.0 µs |
+| same, resampled to 44.1 kHz | 26 | ~0 % | 2.1 µs |
+
+The rendered pictures differ by only 0.6–1.5 % (RMS) between the 384 kHz
+and the 20 kHz-limited versions when the same timing is used, so the
+picture itself fits within the audio band; what the extra bandwidth buys is
+slightly more precise sync timing.
 
 ## 3. Timebase (wow and flutter) correction
 

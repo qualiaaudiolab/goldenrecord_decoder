@@ -14,7 +14,11 @@ jumps, and the interlaced field offset.
 
 The decoder was developed on a 384 kHz / 32-bit float transfer of the 1977
 master tape. It works with any WAV/FLAC recording of the picture section
-(other sample rates, mono or stereo, from tape or from a disc).
+(other sample rates, mono or stereo, from tape or from a disc). The sync
+detector learns the pulse shape from the recording itself, so 44.1 kHz or
+band-limited copies decode as well: on the 90 s excerpt all 26 pictures are
+found at 384 kHz, after a 20 kHz low-pass and at 44.1 kHz, with sync timing
+noise of 1.8, 2.0 and 2.1 µs.
 
 ![first 26 pictures, decoded](docs/images/contact_sheet.png)
 
@@ -29,7 +33,9 @@ of the tape then show as bent or wavy lines, and the AC-coupled recording
 chain leaves dark shadows and halos. This decoder:
 
 * **locks to every sync pulse.** Each line's sync pulse is located to a
-  fraction of a sample by template matching. The measured timing (typically
+  fraction of a sample by matching it against pulse templates learned from
+  the recording itself (one per field, because the two fields' pulses
+  differ). The measured timing (typically
   ±50 µs of wow and flutter per picture) is turned into a smooth,
   continuous time axis, so speed errors are corrected even inside a line.
 * **understands the staggered sync.** On the master tape, sync pulses
@@ -106,6 +112,10 @@ grdecoder                      # start the app
 
 | Setting | What it does |
 |---|---|
+| Template length | sync detection: how much of the line after the rising edge the pulse template covers (default 4 %). Longer templates separate syncs from picture edges better on band-limited copies |
+| Minimum match | sync detection: lowest template correlation accepted as a sync pulse (default 0.60) |
+| Edge scale | sync detection: time scale used to find rising edges (default 20 µs). Raise it for noisy or low-rate copies |
+| Re-analyse with these settings | runs the analysis again with the sync-detection settings above. The **Sync template** tab shows the learned pulses and how well the found pulses match them |
 | Mode | *Sync-locked, smoothed* (default), *per line*, or *Fixed speed* (classic) |
 | Correction bandwidth | how fast a speed variation is still corrected (default 40 Hz; the line rate is 120 Hz) |
 | Speed trim | fixed-speed mode only: manual fine-tuning of the playback speed |
@@ -121,6 +131,7 @@ grdecoder                      # start the app
 ```bash
 grdecoder decode recording.wav --out pictures/ --timing-csv
 grdecoder decode recording.wav --mode fixed --droop no      # plain decode, for comparison
+grdecoder decode copy44k.wav --sync-template-width 0.06     # longer sync template
 grdecoder decode --help                                     # all settings
 ```
 

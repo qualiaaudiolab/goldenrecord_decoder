@@ -38,6 +38,17 @@ def test_finds_one_picture_of_512_lines(decoded):
     assert first_found == truth["lines_before"]
 
 
+def test_sync_times_match_truth(decoded):
+    """Sync positions, after removing the stagger, follow the injected warp to < 0.5 us rms."""
+    dec, truth = decoded
+    run = dec.runs[0][dec.pictures[0].run_id]
+    t = destagger(run.times).times / truth["fs"]
+    q = np.arange(len(t))
+    inj = np.interp(t, truth["warp_t"], truth["warp"])
+    res = (t - np.polyval(np.polyfit(q, t, 1), q)) - (inj - np.polyval(np.polyfit(q, inj, 1), q))
+    assert res.std() < 0.5e-6, res.std()
+
+
 def test_line_period_and_stagger(decoded):
     dec, truth = decoded
     P = dec.period[0]
@@ -67,7 +78,12 @@ def test_droop_time_constant_estimate(decoded):
 
 
 def _column_spread(img):
-    """How much the columns differ (truth: all columns identical)."""
+    """How much the columns differ (truth: all columns identical).
+
+    The outer 12 columns are left out: the picture finder may include a
+    line or two of blank border there.
+    """
+    img = img[:, 12:-12]
     return float(np.std(img - img.mean(axis=1, keepdims=True)) / np.std(img))
 
 
@@ -88,3 +104,30 @@ def test_render_shapes(decoded):
     assert r.image.shape == (300, dec.pictures[0].n_lines + 8)
     disp = r.display()
     assert disp.min() >= 0 and disp.max() <= 1
+
+
+@pytest.mark.parametrize("variant", ["44.1 kHz", "lowpass 15 kHz"])
+def test_other_copies(tmp_path, variant):
+    """The decoder must also work on a 44.1 kHz copy and on a band-limited copy."""
+    import scipy.signal as ss
+
+    y, truth = make_recording()
+    fs = truth["fs"]
+    if variant == "44.1 kHz":
+        y = ss.resample_poly(y, 147, 320).astype(np.float32)
+        fs = 44100
+    else:
+        y = ss.sosfiltfilt(ss.butter(8, 15000, fs=fs, output="sos"), y).astype(np.float32)
+    path = tmp_path / "copy.wav"
+    sf.write(path, y, fs, subtype="FLOAT")
+    dec = Decoder(path)
+    dec.analyse(channels=(0,))
+    assert len(dec.pictures) == 1
+    p = dec.pictures[0]
+    assert p.sync_found > 0.98
+    run = dec.runs[0][p.run_id]
+    t = destagger(run.times).times / fs
+    q = np.arange(len(t))
+    inj = np.interp(t, truth["warp_t"], truth["warp"])
+    res = (t - np.polyval(np.polyfit(q, t, 1), q)) - (inj - np.polyval(np.polyfit(q, inj, 1), q))
+    assert res.std() < 2e-6, res.std()

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .pipeline import DecodeSettings, Decoder, display_width, save_png
+from .pipeline import DecodeSettings, Decoder, SyncSettings, display_width, save_png
 from .render import auto_levels, combine_colour, resize_columns, tone_map
 
 
@@ -39,6 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--channels", type=int, nargs="+", default=None, help="channels to decode (0=left, 1=right)")
     d.add_argument("--no-colour", action="store_true", help="do not combine colour separations")
     d.add_argument("--timing-csv", action="store_true", help="also write per-line timing CSV per picture")
+    for f in fields(SyncSettings):  # sync detection fine-tuning: --sync-min-score etc.
+        v = getattr(SyncSettings(), f.name)
+        d.add_argument("--sync-" + f.name.replace("_", "-"), dest="sync_" + f.name, type=type(v), default=v,
+                       help=f"sync detection (default {v})")
     defaults = DecodeSettings()
     for f in fields(DecodeSettings):
         v = getattr(defaults, f.name)
@@ -58,7 +62,8 @@ def _bool(s: str) -> bool:
 
 def decode(args) -> int:
     st = DecodeSettings(**{f.name: getattr(args, f.name) for f in fields(DecodeSettings)})
-    dec = Decoder(args.wav)
+    sync_st = SyncSettings(**{f.name: getattr(args, "sync_" + f.name) for f in fields(SyncSettings)})
+    dec = Decoder(args.wav, sync_settings=sync_st)
     info = dec.source.info
     print(f"{info.path.name}: {info.samplerate} Hz, {info.channels} ch, {info.duration:.1f} s, {info.subtype}")
     channels = args.channels if args.channels is not None else list(range(min(2, info.channels)))

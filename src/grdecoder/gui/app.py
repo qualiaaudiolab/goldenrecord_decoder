@@ -26,7 +26,8 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .. import __version__
-from ..pipeline import BACK_PORCH, LINES_PER_PICTURE, DecodeSettings, Decoder, Picture, Rendered, display_width, save_png
+from ..pipeline import (BACK_PORCH, LINES_PER_PICTURE, DecodeSettings, Decoder, Picture, Rendered, SyncSettings,
+                        display_width, save_png)
 from ..render import auto_levels, combine_colour, measure_circle_aspect, resize_columns, tone_map
 from . import theme
 from .playback import Player
@@ -322,6 +323,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ro_field = readout(); f.addRow("Field offset", self.ro_field)
         self.ro_tau = readout(); f.addRow("Droop time constant", self.ro_tau)
 
+        # --- sync detection (analysis) -------------------------------------
+        f = group("SYNC DETECTION")
+        self.w_tplen = dspin(1, 10, 4, 0.5, 1, " % of line")
+        self.w_tplen.setToolTip("Length of the sync-pulse template after the rising edge.\n"
+                                "Longer = more distinctive on dull or band-limited copies;\n"
+                                "shorter = less affected by picture content after the pulse.")
+        f.addRow("Template length", self.w_tplen)
+        self.w_minscore = dspin(0.3, 0.95, 0.6, 0.05, 2)
+        self.w_minscore.setToolTip("Minimum match (0-1) for a pulse to count. Lower it if many pulses\n"
+                                   "are shown as predicted (red); raise it if noise is taken for pulses.")
+        f.addRow("Minimum match", self.w_minscore)
+        self.w_edge = dspin(2, 200, 20, 1, 0, " µs")
+        self.w_edge.setToolTip("Time over which a rising edge is measured when looking for the\n"
+                               "line rhythm. Raise it for noisy copies, lower it for very sharp ones.")
+        f.addRow("Edge scale", self.w_edge)
+        self.btn_reanalyse = QtWidgets.QPushButton("Re-analyse with these settings")
+        self.btn_reanalyse.clicked.connect(self.reanalyse)
+        f.addRow(self.btn_reanalyse)
+
         # --- timebase -----------------------------------------------------
         f = group("TIMEBASE")
         self.w_mode = QtWidgets.QComboBox()
@@ -436,10 +456,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.p_speed = styled_plot("speed deviation (ppm)", "picture line")
         self.p_scope = styled_plot("signal", "fraction of line (0 = sync)")
         self.p_finder = styled_plot("blanking similarity", "line in run")
+        self.p_sync = styled_plot("template", "time from the rising edge (µs)")
         tabs.addTab(self.p_timing, "TIMING ERROR")
         tabs.addTab(self.p_speed, "SPEED")
         tabs.addTab(self.p_scope, "LINE SCOPE")
         tabs.addTab(self.p_finder, "PICTURE FINDER")
+        tabs.addTab(self.p_sync, "SYNC TEMPLATE")
         dock.setWidget(tabs)
         dock.setMinimumHeight(180)
         self.addDockWidget(QtCore.Qt.BottomDockWidgetArea, dock)
@@ -458,6 +480,7 @@ class MainWindow(QtWidgets.QMainWindow):
             a.setEnabled(on)
         self.btn_colour.setEnabled(on)
         self.btn_circle.setEnabled(on)
+        self.btn_reanalyse.setEnabled(on)
 
     # ------------------------------------------------------- settings sync
     def _sync_widgets_from_settings(self):
@@ -550,10 +573,19 @@ class MainWindow(QtWidgets.QMainWindow):
         if urls:
             self.open_file(urls[0].toLocalFile())
 
+    def sync_settings(self) -> SyncSettings:
+        return SyncSettings(template_width=self.w_tplen.value() / 100, min_score=self.w_minscore.value(),
+                            edge_scale_us=self.w_edge.value())
+
+    def reanalyse(self):
+        if self.decoder is not None or getattr(self, "_path", None):
+            self.open_file(str(self._path))
+
     def open_file(self, path: str):
+        self._path = Path(path)
         self._qsettings.setValue("last_dir", str(Path(path).parent))
         try:
-            dec = Decoder(path)
+            dec = Decoder(path, sync_settings=self.sync_settings())
         except Exception as ex:
             QtWidgets.QMessageBox.critical(self, "Cannot open file", str(ex))
             return
@@ -891,6 +923,22 @@ class MainWindow(QtWidgets.QMainWindow):
                                       pen=pg.mkPen(theme.ACCENT_DIM))
             self.p_finder.addItem(reg)
         self._update_scope()
+
+        # the learned sync-pulse templates of this channel (one per kind of line)
+        self.p_sync.clear()
+        tpl = self.decoder.templates.get(r.picture.channel)
+        if tpl is not None:
+            rate = self.decoder.template_rate.get(r.picture.channel, r.fs)  # samples/s of the template
+            t = (np.arange(tpl.length) - tpl.pre) / rate * 1e6
+            for i, shp in enumerate(tpl.shapes):
+                self.p_sync.plot(t, shp, pen=pg.mkPen(theme.TRACE if i == 0 else theme.ACCENT, width=1.4),
+                                 name=f"line type {'AB'[i]}")
+            self.p_sync.addItem(pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen(theme.BORDER, style=QtCore.Qt.DashLine)))
+            n = len(run.score)
+            meas = run.measured
+            self.p_sync.setTitle(f"match of the found pulses: median {np.median(run.score[meas]):.3f}, "
+                                 f"lowest 5 % below {np.percentile(run.score[meas], 5):.3f}  ·  "
+                                 f"{(~meas).sum()} of {n} predicted", color=theme.TEXT_DIM, size="9pt")
 
     def _image_clicked(self, ev):
         if self.rendered is None or not self.vb.sceneBoundingRect().contains(ev.scenePos()):

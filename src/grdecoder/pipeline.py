@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
+import scipy.signal as ss
 
 from . import sync
 from .audio import AudioSource
@@ -71,6 +72,20 @@ class DecodeSettings:
     gamma: float = 1.0
     black_pct: float = 0.3
     white_pct: float = 99.7
+
+
+@dataclass
+class SyncSettings:
+    """Fine-tuning of the sync-pulse detection (analysis stage).
+
+    The defaults work on the 384 kHz master transfer and on 44.1/48 kHz or
+    band-limited copies of it. Change them only if pictures are missed or
+    the timing plot shows many predicted (red) pulses.
+    """
+
+    template_width: float = 0.04    # length of the sync template after the rise, fraction of a line
+    min_score: float = 0.6          # minimum match (0..1) for a pulse to count
+    edge_scale_us: float = 20.0     # time over which a rising edge is measured (µs)
 
 
 @dataclass
@@ -131,13 +146,15 @@ class Rendered:
 class Decoder:
     """Analyse a Voyager image-data recording and render its pictures."""
 
-    def __init__(self, path: str | Path, speed_guess: float = 1.0):
+    def __init__(self, path: str | Path, speed_guess: float = 1.0, sync_settings: SyncSettings | None = None):
         self.source = AudioSource(path)
+        self.sync_settings = sync_settings or SyncSettings()
         self.fs = self.source.fs
         # expected line period in this file; refined during analysis
         self.period_guess = NOMINAL_LINE_S * self.fs / speed_guess
         self.period: dict[int, float] = {}
         self.templates: dict[int, sync.SyncTemplate] = {}
+        self.template_rate: dict[int, float] = {}  # sample rate the template was made at
         self.runs: dict[int, list[sync.LineTrack]] = {}
         self.pictures: list[Picture] = []
         self._tau_cache: dict[tuple[int, int], float | None] = {}
@@ -157,63 +174,74 @@ class Decoder:
 
     def _analyse_channel(self, ch: int, prog) -> None:
         fs = self.fs
+        S = self.sync_settings
         P = self.period_guess
         block = int(20 * fs)
         overlap = int(0.2 * fs)
         nblocks = int(np.ceil(self.source.info.frames / (block - overlap)))
+        # below ~150 kHz the sync pulse spans only a few samples: work on a
+        # 4x (or more) upsampled copy so the template has enough samples
+        U = 1 if fs >= 150000 else int(np.ceil(176400 / fs))
 
-        # pass 1: candidate transients everywhere (cheap); find the line period
-        # and the block that contains the most picture-line sync pulses
-        cands, best = [], (-1, 0)
+        def up(x):
+            return ss.resample_poly(x, U, 1) if U > 1 else x
+
+        # pass 1: rising edges everywhere -> rough line period
+        cands = []
         for bi, (start, x) in enumerate(self.source.blocks(ch, block, overlap)):
-            prog(0.3 * bi / nblocks, f"scanning {100 * bi / nblocks:.0f} %")
-            c = sync.find_candidates(x, P) if len(x) > 4 * P else np.empty(0, np.int64)
-            cands.append((start, c))
-        allc = np.unique(np.concatenate([c + s for s, c in cands]))
+            prog(0.15 * bi / nblocks, f"scanning {100 * bi / nblocks:.0f} %")
+            if len(x) > 4 * P:
+                cands.append(sync.find_candidates(x, P, fs, S.edge_scale_us) + start)
         try:
-            periods = sync.estimate_period(allc, P, n_best=4)
-        except ValueError:
-            self.runs[ch] = []
-            return
-        # several rhythms may be present (lead-in signals); the picture rhythm
-        # is the one with the most staggered sync pulses
-        best_n = -1
-        for Pc in periods:
-            counts = [int(sync.staggered(c, Pc).sum()) for _, c in cands]
-            if sum(counts) > best_n:
-                best_n, P = sum(counts), Pc
-                best = (int(np.argmax(counts)), max(counts))
-        if best[1] < 16:
+            P = sync.estimate_period(np.unique(np.concatenate(cands)), P)
+        except (ValueError, IndexError):
             self.runs[ch] = []
             return
 
-        # the sync-pulse template, from the staggered pulses of that block
-        start, c = cands[best[0]]
-        x = self.source.read(ch, start, start + block)
-        tpl = sync.build_template(x, c[sync.staggered(c, P)], P)
+        # pass 2: aligned folds at a few places per block; the sharpest one that
+        # shows the staggered sync pair gives the template
+        best_key, best = None, None
+        for bi, (start, x) in enumerate(self.source.blocks(ch, block, overlap)):
+            prog(0.15 + 0.15 * bi / nblocks, f"learning the sync pulse {100 * bi / nblocks:.0f} %")
+            xu = up(x)
+            for f in (0.15, 0.5, 0.85):
+                prof = sync.aligned_fold(xu, int(f * len(xu)), P * U)
+                if prof is None:
+                    continue
+                info = sync.inspect_fold(prof, P * U, fs * U, S.edge_scale_us)
+                key = (info.i2 is not None, info.sharpness)
+                if best_key is None or key > best_key:
+                    best_key, best = key, info
+        if best is None:
+            self.runs[ch] = []
+            return
+        tpl = sync.template_from_fold(best, P * U, S.template_width, fs * U)
 
-        # pass 2: sub-sample position and similarity of every candidate
+        # pass 3: matched-filter detection of every sync pulse
         pos_all, score_all = [], []
         for bi, (start, x) in enumerate(self.source.blocks(ch, block, overlap)):
             prog(0.3 + 0.5 * bi / nblocks, f"measuring sync pulses {100 * bi / nblocks:.0f} %")
-            c = cands[bi][1]
-            if len(c) == 0:
-                continue
-            pos, score = sync.refine(x, c, tpl, search=int(0.03 * P))
-            # keep each candidate from exactly one block (centre part of the overlap)
+            pos, score = sync.detect(up(x), tpl, P * U, S.min_score)
+            pos = pos / U
+            # keep each pulse from exactly one block (centre part of the overlap)
             lo = 0 if start == 0 else overlap // 2
             hi = len(x) - overlap // 2
-            keep = np.isfinite(pos) & (pos >= lo) & (pos < hi)
+            keep = (pos >= lo) & (pos < hi)
             pos_all.append(pos[keep] + start)
             score_all.append(score[keep])
-        pos = np.concatenate(pos_all)
-        score = np.concatenate(score_all)
+        pos = np.concatenate(pos_all) if pos_all else np.empty(0)
+        score = np.concatenate(score_all) if score_all else np.empty(0)
+        try:
+            P = sync.estimate_period(pos[score > max(0.8, S.min_score)], P)
+        except ValueError:
+            pass
         self.period[ch] = P
         self.templates[ch] = tpl
+        self.template_rate[ch] = fs * U
 
         prog(0.82, "tracking lines")
         runs = []
-        for t, m, s in sync.merge_runs(sync.track_lines(pos, score, P), P):
+        for t, m, s in sync.merge_runs(sync.track_lines(pos, score, P, min_score=S.min_score), P):
             runs.append(sync.LineTrack(ch, t, m, s, float(np.median(np.diff(t)))))
         self.runs[ch] = runs
 

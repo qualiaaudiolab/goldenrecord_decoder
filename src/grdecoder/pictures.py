@@ -55,7 +55,7 @@ def hatch_score(profiles: np.ndarray) -> np.ndarray:
     return count
 
 
-def find_start_marker(hatch: np.ndarray, near: int, search: int = 80, min_count: int = 8,
+def find_start_marker(hatch: np.ndarray, near: int, search: int = 160, min_count: int = 8,
                       min_len: int = 6) -> int | None:
     """Last line of the start marker closest before line `near`, or None.
 
