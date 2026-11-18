@@ -269,29 +269,47 @@ def measure_circle_aspect(img: np.ndarray) -> tuple[float, dict]:
 
     Picture 1 on the record is a circle, reproduced on the cover so that the
     recipient can check the decoding. Here it calibrates the picture
-    geometry: we find the ring's top/bottom (average of the central
-    columns) and left/right (average of the central rows), and return the
-    width/height ratio (for 512 lines) at which its horizontal and vertical
-    diameters are equal on screen. `img` is the un-tone-mapped picture (rows, lines).
+    geometry. The ring is found as the strongest pixels away from the
+    picture's edges (the framed area has bright and dark borders that must
+    not be mistaken for the ring), an axis-aligned ellipse is fitted to them
+    by least squares, with outliers (streaks, specks) removed in a few
+    passes, and the width/height ratio (for 512 lines) at which the ring's
+    horizontal and vertical diameters are equal on screen is returned.
+    `img` is the un-tone-mapped picture (rows, lines).
     """
-    import scipy.signal as ss
+    from scipy.ndimage import median_filter
 
     h, w = img.shape
-    d = img - np.median(img)
+    d = img - median_filter(img, size=(1, 31), mode="nearest")  # remove vertical streaks
     if abs(np.percentile(d, 0.2)) > abs(np.percentile(d, 99.8)):
         d = -d  # ring darker than background
-    c0, c1 = int(0.45 * w), int(0.57 * w)
-    col = d[:, c0:c1].mean(axis=1)
-    pk, _ = ss.find_peaks(col, distance=h // 5)
-    if len(pk) < 2:
-        raise ValueError("No ring found in the central columns.")
-    y0, y1 = sorted(pk[np.argsort(col[pk])[-2:]])
-    yc = int((y0 + y1) / 2)
-    row = d[max(0, yc - h // 50) : yc + h // 50, :].mean(axis=0)
-    pk, _ = ss.find_peaks(row, distance=w // 5)
-    if len(pk) < 2:
-        raise ValueError("No ring found in the central rows.")
-    x0, x1 = sorted(pk[np.argsort(row[pk])[-2:]])
-    ry, rx = (y1 - y0) / 2, (x1 - x0) / 2
+    my, mx = int(0.04 * h), int(0.05 * w)
+    inner = d[my : h - my, mx : w - mx]
+    thr = np.percentile(inner, 98.5)
+    ys, xs = np.nonzero(inner > thr)
+    if len(xs) < 50:
+        raise ValueError("No ring found.")
+    ys = ys.astype(float) + my
+    xs = xs.astype(float) + mx
+    keep = np.ones(len(xs), bool)
+    for _ in range(4):
+        M = np.c_[xs[keep] ** 2, ys[keep] ** 2, xs[keep], ys[keep]]
+        A, B, C, D = np.linalg.lstsq(M, np.ones(keep.sum()), rcond=None)[0]
+        cx, cy = -C / (2 * A), -D / (2 * B)
+        k = 1 + C * C / (4 * A) + D * D / (4 * B)
+        if A * B <= 0 or k / A <= 0:  # not an ellipse
+            raise ValueError("No ring found.")
+        rx, ry = np.sqrt(k / A), np.sqrt(k / B)
+        r = np.hypot((xs - cx) / rx, (ys - cy) / ry)
+        keep = np.abs(r - 1) < 0.04
+        if keep.sum() < 50:
+            raise ValueError("No ring found.")
+    if not (0.15 * w < rx < 0.6 * w and 0.15 * h < ry < 0.6 * h):
+        raise ValueError("No ring found.")
+    # a real ring: most bright pixels lie on it, all the way round
+    ang = np.arctan2((ys[keep] - cy) / ry, (xs[keep] - cx) / rx)
+    coverage = len(np.unique(((ang + np.pi) / (2 * np.pi) * 36).astype(int))) / 36
+    if keep.mean() < 0.6 or coverage < 0.6:
+        raise ValueError("This picture is not the calibration circle.")
     aspect = (ry / h) / (rx / 512)  # aspect is defined for a width of 512 lines
-    return float(aspect), {"rows": (int(y0), int(y1)), "lines": (int(x0), int(x1))}
+    return float(aspect), {"rows": (int(cy - ry), int(cy + ry)), "lines": (int(cx - rx), int(cx + rx))}
