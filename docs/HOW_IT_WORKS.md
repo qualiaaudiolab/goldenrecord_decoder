@@ -159,16 +159,28 @@ bit is measurement noise (~0.7 sample per pulse). 40 Hz is the default.
 
 ### Where do the errors come from?
 
-Both channels pass the same replay head at the same moment, so errors made
-by the **replay** machine during the transfer would be identical on both
-channels. Comparing the timing errors of the two channels over the same
-stretch of tape: below 5 Hz they correlate on some stretches (r up to 0.99)
-and not at all on others; above 5 Hz they are mostly uncorrelated. So most
-of the error was recorded **into** each channel when the pictures were put on
-tape in 1977 (each channel's pictures were laid down separately), and only
-part comes from the transfer. A replay-only correction (for example from a
-pilot tone) could not remove it; the sync pulses, recorded together with the
-picture, can.
+Both tracks pass the same replay head at the same moment, so errors made by
+the **replay** machine during the transfer are identical on both. Measured on
+the 90 s, 30 s and 112 s excerpts (destaggered sync times, each track's own
+linear trend removed):
+
+* **Lead-in** (before the first picture, the same signal on both tracks):
+  the two tracks agree to 1.5 µs rms over 6 s while each wanders by ~90 µs
+  (r = 1.000). Replay errors are therefore common to both tracks, and
+  dynamic azimuth (tape skew) contributes at most ~1 µs between them.
+* **Pictures** (34 left/right pairs that overlap on the tape): the two tracks
+  run at line rates that differ by −48 to +202 ppm, changing from pair to
+  pair, and their flutter is largely independent (pooled coherence 0.04–0.18
+  between 1 and 30 Hz). Static or dynamic azimuth cannot cause a sustained
+  rate difference: 200 ppm over a 4 s picture builds up to 800 µs.
+
+So the tracks were not recorded together: each track's pictures were laid
+down separately, most likely one take at a time, each with its own speed and
+wow. A replay-only correction (for example from a pilot tone) could not
+remove these errors; the sync pulses, recorded together with the picture,
+can.
+
+![timing error of both tracks: lead-in vs a picture pair](images/tracks.png)
 
 ### Speed calibration
 
