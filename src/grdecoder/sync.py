@@ -4,29 +4,36 @@ sync.py - finding the picture-line sync pulses with sub-sample precision.
 Signal facts this module relies on (measured on the 384 kHz master-tape
 transfer, see docs/HOW_IT_WORKS.md):
 
-* Every picture line starts with a short, sharp positive pulse. It has the
-  steepest slope anywhere in the signal, so the absolute first difference
-  |x[n+1] - x[n]| shows it as a tall, narrow spike.
+* Every picture line starts with a short positive sync pulse: on the master
+  tape it is the steepest rising edge in the signal.
 * Lines repeat about every 8.33 ms, but sync pulses are NOT evenly spaced:
-  they alternate early/late by about 1.6 % of a line ("staggered interlace"
-  on the record cover). Consecutive intervals therefore alternate between
-  roughly P + 2d and P - 2d, while the picture content itself sits on an
-  even grid. `timebase.py` removes the stagger; here we only have to make
-  sure the tracker tolerates it.
+  they alternate early/late by about 1.6 % of a line ("staggered
+  interlace"). Consecutive intervals therefore alternate between roughly
+  P + 2d and P - 2d, while the picture content itself sits on an even grid.
+  `timebase.py` removes the stagger; here the tracker only tolerates it.
 
-Processing chain
-----------------
-1. `find_candidates`   - every steep transient that could be a sync pulse.
-2. `build_template`    - the median shape of the strongest, regularly spaced
-                         candidates = what a sync pulse looks like on THIS
-                         file and channel (shape differs between channels).
-3. `refine`            - cross-correlate each candidate with the template;
-                         gives a sub-sample position and a 0..1 similarity
-                         score that rejects picture-content transients.
-4. `track_lines`       - a flywheel: follow the line rhythm through the
-                         candidates, pick the best-scoring candidate in each
-                         expected slot, and bridge short gaps (dropouts) with
-                         predicted positions that are flagged as such.
+The detector has to work on any copy of the recording: the 384 kHz master
+transfer, a 44.1 kHz file, a band-limited or noisier source. On a
+band-limited copy the sync pulse is no longer clearly the steepest edge, so
+the method does not rely on that. It works in three steps:
+
+1. `find_candidates` + `estimate_period` - rising edges, and the most common
+   line rhythm among them. Only used to get the line period roughly.
+2. `aligned_fold` + `template_from_fold` - take a stretch of ~80 lines,
+   align consecutive line pairs to each other by cross-correlating whole
+   pairs (neighbouring lines of a picture look alike), and average them.
+   Picture content averages away, the sync structure that repeats every two
+   lines remains, sharp. The template is cut from that average, around its
+   steepest rising edge.
+3. `detect` - normalised cross-correlation of the whole signal with the
+   template (a matched filter). Every local maximum above `min_score` is a
+   sync pulse, located to a fraction of a sample by parabolic interpolation.
+
+Then `track_lines` follows the line rhythm through the detections, bridges
+dropouts and splits the recording into runs of consecutive lines.
+
+Tuning knobs (SyncSettings in pipeline.py, "Sync detection" in the app):
+the template width, the minimum match score and the edge scale.
 """
 
 from __future__ import annotations
@@ -38,41 +45,163 @@ import scipy.signal as ss
 
 
 # --------------------------------------------------------------------------
-# 1. candidates
+# 1. rough line period
 # --------------------------------------------------------------------------
-def find_candidates(x: np.ndarray, period: float, rel_threshold: float = 0.3) -> np.ndarray:
-    """Return integer indices of steep transients in `x`.
+def rising_edges(x: np.ndarray, fs: float, scale_us: float = 20.0) -> np.ndarray:
+    """Rise of the signal over `scale_us` microseconds, negative values set to 0.
 
-    The threshold adapts to the block: we take the largest slope in every
-    line-length window (in a picture that is nearly always the sync pulse),
-    use the median of those maxima as "typical sync height", and accept
-    everything above `rel_threshold` times that. Candidates only need to be
-    a little apart (5 % of a line) so that a large picture-content edge
-    cannot hide a nearby sync pulse; the template score sorts them out later.
+    Measuring the slope over a fixed time (not over one sample) makes the
+    detector behave the same at any sample rate and on band-limited copies.
     """
-    slope = np.abs(np.diff(x))
-    n_win = len(slope) // int(period)
+    L = max(1, int(round(fs * scale_us * 1e-6)))
+    d = np.zeros_like(x)
+    d[:-L] = x[L:] - x[:-L]
+    return np.maximum(d, 0.0)
+
+
+def find_candidates(x: np.ndarray, period: float, fs: float, scale_us: float = 20.0,
+                    rel_threshold: float = 0.3) -> np.ndarray:
+    """Indices of strong rising edges (used only to estimate the line period).
+
+    Accepts every edge rising at least `rel_threshold` times as fast as the
+    typical fastest edge of a line-long window.
+    """
+    d = rising_edges(x, fs, scale_us)
+    n_win = len(d) // int(period)
     if n_win < 4:
         return np.empty(0, dtype=np.int64)
-    win_max = slope[: n_win * int(period)].reshape(n_win, int(period)).max(axis=1)
+    win_max = d[: n_win * int(period)].reshape(n_win, int(period)).max(axis=1)
     height = rel_threshold * np.median(win_max)
-    peaks, _ = ss.find_peaks(slope, height=height, distance=max(2, int(0.05 * period)))
+    if height <= 0:
+        return np.empty(0, dtype=np.int64)
+    peaks, _ = ss.find_peaks(d, height=height, distance=max(2, int(0.05 * period)))
     return peaks.astype(np.int64)
 
 
+def two_line_distances(times: np.ndarray, guess: float) -> np.ndarray:
+    """For every candidate, the distance to the candidate closest to two lines later.
+
+    Over two lines the sync stagger cancels, so these distances cluster
+    tightly at 2 x the line period, whatever the stagger.
+    """
+    t = np.sort(np.asarray(times, dtype=float))
+    lo = np.searchsorted(t, t + 1.6 * guess)
+    hi = np.searchsorted(t, t + 2.4 * guess)
+    d = []
+    for i in np.flatnonzero(hi > lo):
+        cand = t[lo[i] : hi[i]] - t[i]
+        d.append(cand[np.argmin(np.abs(cand - 2 * guess))])
+    return np.asarray(d)
+
+
+def estimate_period(times: np.ndarray, guess: float, n_best: int = 1):
+    """Line period(s) of the most common line rhythms among the candidates.
+
+    The recording also contains lead-in signals with a slightly different
+    rhythm, so we histogram the two-line distances (0.5-sample bins) and
+    return the `n_best` strongest, clearly separated peaks, each refined by
+    the median of the distances within +-0.2 % of it and halved. With
+    n_best=1 a single float is returned.
+    """
+    d = two_line_distances(times, guess)
+    if len(d) < 8:
+        raise ValueError("Could not find a regular line rhythm near the expected period.")
+    bins = np.arange(d.min(), d.max() + 1.0, 0.5)
+    if len(bins) < 3:
+        out = [float(np.median(d) / 2)]
+    else:
+        h, e = np.histogram(d, bins=bins)
+        centres = 0.5 * (e[:-1] + e[1:])
+        out = []
+        for i in np.argsort(h)[::-1]:
+            c = centres[i]
+            if h[i] < 8 or any(abs(c / (2 * o) - 1) < 0.003 for o in out):
+                continue
+            near = d[np.abs(d / c - 1) < 0.002]
+            out.append(float(np.median(near) / 2))
+            if len(out) >= n_best:
+                break
+    return out[0] if n_best == 1 else out
+
+
 # --------------------------------------------------------------------------
-# 2. template
+# 2. template from an aligned fold
 # --------------------------------------------------------------------------
+def aligned_fold(x: np.ndarray, start: int, period: float, n_pairs: int = 40,
+                 search: float = 0.03) -> np.ndarray | None:
+    """Average of `n_pairs` consecutive two-line segments, each aligned to the last.
+
+    Every segment is placed where the previous one ended plus two line
+    periods, then shifted by up to +-`search` of a pair to best match the
+    previous segment (FFT cross-correlation). Because the alignment follows
+    the signal, speed drift of the tape does not blur the average.
+    Returns the averaged segment (length 2 x period) or None if it does not fit.
+    """
+    L2 = int(round(2 * period))
+    m = int(search * L2)
+    if start < 0 or start + n_pairs * (L2 + m) + m >= len(x):
+        return None
+    ref = x[start : start + L2] - x[start : start + L2].mean()
+    acc = ref.copy()
+    pos = start
+    for _ in range(n_pairs - 1):
+        a = pos + L2 - m
+        seg = x[a : a + L2 + 2 * m]
+        seg = seg - seg.mean()
+        c = ss.correlate(seg, ref, mode="valid", method="fft")
+        pos = a + int(np.argmax(c))
+        cur = x[pos : pos + L2]
+        cur = cur - cur.mean()
+        acc += cur
+        ref = cur
+    return acc / n_pairs
+
+
+@dataclass
+class FoldInfo:
+    """What an aligned fold reveals about a stretch of signal."""
+
+    profile: np.ndarray
+    i1: int            # index of the steepest rising edge in the profile
+    i2: int | None     # matching edge of the other line of the pair, if staggered
+    sharpness: float   # steepest edge relative to the typical slope
+
+
+def inspect_fold(profile: np.ndarray, period: float, fs: float, scale_us: float = 20.0) -> FoldInfo:
+    """Find the sync edges in an aligned fold and check for the stagger.
+
+    In a picture the two-line profile shows two sync edges about one line
+    apart, but 2-5 % more or less than a full line (the stagger measures
+    ~3.1 %). Lead-in signals show no such pair.
+    """
+    d = rising_edges(np.r_[profile, profile[:64]], fs, scale_us)[: len(profile)]
+    i1 = int(np.argmax(d))
+    sharp = float(d[i1] / (np.mean(d) + 1e-12))
+    n = len(profile)
+    best, i2 = 0.0, None
+    for sign in (+1, -1):
+        lo, hi = sorted((i1 + period * (1 + sign * 0.02), i1 + period * (1 + sign * 0.05)))
+        idx = np.arange(int(lo), int(hi) + 1) % n
+        j = int(idx[np.argmax(d[idx])])
+        if d[j] > best:
+            best, i2 = d[j], j
+    if best < 0.4 * d[i1]:
+        i2 = None
+    return FoldInfo(profile, i1, i2, sharp)
+
+
 @dataclass
 class SyncTemplate:
-    """Median sync-pulse waveform for one channel.
+    """Sync-pulse waveforms used for matched filtering.
 
-    `pre` samples precede the reference point and `post` follow it; the
-    reference point is where the template's own steepest rise is, so the
-    "time of a sync pulse" means the same thing on every channel.
+    `shapes` holds one waveform per kind of line (the two kinds of sync pulse
+    differ after the first ~1 % of a line), each `pre + post` samples long
+    with the reference point - the steepest rise - at index `pre`, so the
+    "time of a sync pulse" means the same thing for both kinds, on every
+    channel and every copy.
     """
 
-    shape: np.ndarray
+    shapes: list
     pre: int
     post: int
 
@@ -80,119 +209,84 @@ class SyncTemplate:
     def length(self) -> int:
         return self.pre + self.post
 
+    @property
+    def shape(self) -> np.ndarray:  # the first waveform, for display
+        return self.shapes[0]
 
-def template_extent(period: float) -> tuple[int, int]:
-    """Window around a sync pulse used for matching: -1 %..+1 % of a line.
 
-    Kept deliberately short: ~1.2 % of a line after the leading spike the
-    two kinds of sync pulse diverge (the blanking plateau that follows is
-    short on one line and long on the next), and the template must fit both.
+def template_from_fold(info: FoldInfo, period: float, width: float = 0.04, fs: float = 384000.0,
+                       min_us: float = 60.0) -> SyncTemplate:
+    """Cut the template(s) out of the fold around the sync edge(s).
+
+    The window starts 1 % of a line before the rise and runs `width` of a
+    line after it, so it includes the flat pulse top whose length tells the
+    two kinds of line apart. That makes the template distinctive even on a
+    band-limited copy, where a short template would also match ordinary
+    picture edges. With a staggered pair, one template per kind of line is
+    made; detection uses whichever matches better.
     """
-    return int(round(0.01 * period)), int(round(0.01 * period))
-
-
-def build_template(x: np.ndarray, candidates: np.ndarray, period: float, iterations: int = 3) -> SyncTemplate:
-    """Estimate the sync pulse shape from candidates that recur once per line.
-
-    Only candidates followed by another candidate roughly one line later are
-    used (picture-content edges rarely are). The shape is the sample-wise
-    median, re-aligned a few times by cross-correlation so that small
-    alignment errors of the first pass do not blur it.
-    """
-    pre, post = template_extent(period)
-    c = np.sort(np.asarray(candidates))
-    # keep only the steepest candidates: sync pulses have the steepest edge
-    # of a line, so their slope is close to the typical per-line maximum,
-    # while framing and picture edges are usually well below it
-    slope = np.abs(np.diff(x))
-    c = c[c < len(slope)]
-    n_win = len(slope) // int(period)
-    typical = np.median(slope[: n_win * int(period)].reshape(n_win, int(period)).max(axis=1))
-    c = c[slope[c] >= 0.7 * typical]
-    if len(c) > 2:
-        d = np.diff(c)
-        regular = np.zeros(len(c), bool)
-        regular[:-1] |= np.abs(d / period - 1) < 0.08
-        c = c[regular]
-    c = c[(c - pre - 64 >= 0) & (c + post + 64 < len(x))]
-    if len(c) < 8:
-        raise ValueError("Too few regular sync candidates to build a template.")
-    if len(c) > 2000:  # plenty for a median; keep it fast
-        c = c[np.linspace(0, len(c) - 1, 2000).astype(int)]
-
-    pos = c.astype(float)
-    margin = 16
-    for _ in range(iterations):
-        # median shape of the current alignment ...
-        segs = np.array([_frac_window(x, p, pre, post) for p in pos])
-        segs -= segs.mean(axis=1, keepdims=True)
-        shape = np.median(segs, axis=0)
-        # ... then align every example to it
-        lag = np.array([_xcorr_peak(_frac_window(x, p, pre + margin, post + margin), shape)[0] for p in pos])
-        pos = pos + lag - margin
-    # final shape; put the reference point on its steepest rise
-    segs = np.array([_frac_window(x, p, pre, post) for p in pos])
-    segs -= segs.mean(axis=1, keepdims=True)
-    shape = np.median(segs, axis=0)
-    pos = pos + (int(np.argmax(np.diff(shape))) - pre)
-    segs = np.array([_frac_window(x, p, pre, post) for p in pos])
-    segs -= segs.mean(axis=1, keepdims=True)
-    shape = np.median(segs, axis=0)
-    shape /= np.linalg.norm(shape) + 1e-30
-    return SyncTemplate(shape=shape, pre=pre, post=post)
+    pre = max(int(round(0.01 * period)), int(round(min_us * 1e-6 * fs)), 4)
+    post = max(int(round(width * period)), int(round(min_us * 1e-6 * fs)), 4)
+    prof = np.r_[info.profile, info.profile, info.profile]
+    n = len(info.profile)
+    shapes = []
+    for i in ([info.i1, info.i2] if info.i2 is not None else [info.i1]):
+        seg = prof[n + i - pre : n + i + post].copy()
+        seg -= seg.mean()
+        seg /= np.linalg.norm(seg) + 1e-30
+        shapes.append(seg)
+    return SyncTemplate(shapes=shapes, pre=pre, post=post)
 
 
 # --------------------------------------------------------------------------
-# 3. refinement
+# 3. matched-filter detection
 # --------------------------------------------------------------------------
-def refine(x: np.ndarray, candidates: np.ndarray, tpl: SyncTemplate, search: int) -> tuple[np.ndarray, np.ndarray]:
-    """Sub-sample position and similarity score for every candidate.
+def match(x: np.ndarray, tpl: SyncTemplate) -> np.ndarray:
+    """Normalised cross-correlation (-1..1) of `x` with the best-fitting template.
 
-    For each candidate we slide the template over +-`search` samples, take
-    the lag with the highest normalised correlation, and refine it with a
-    parabola through the three best points (accuracy ~0.05 sample on clean
-    pulses). Returns (positions, scores); positions refer to the template
-    reference point (steepest rise).
+    r[k] compares the template with x[k : k + length]; the reference point
+    of a match at k is k + tpl.pre.
     """
-    pos = np.full(len(candidates), np.nan)
-    score = np.zeros(len(candidates))
-    for i, c in enumerate(candidates):
-        a = int(c) - tpl.pre - search
-        b = int(c) + tpl.post + search
-        if a < 0 or b > len(x):
-            continue
-        seg = x[a:b]
-        lag, r = _xcorr_peak(seg, tpl.shape)
-        pos[i] = a + lag + tpl.pre
-        score[i] = r
-    return pos, score
+    L = tpl.length
+    s1 = np.concatenate(([0.0], np.cumsum(x)))
+    s2 = np.concatenate(([0.0], np.cumsum(x * x)))
+    e = np.sqrt(np.maximum((s2[L:] - s2[:-L]) - (s1[L:] - s1[:-L]) ** 2 / L, 1e-30))
+    r = None
+    for shape in tpl.shapes:
+        ri = ss.oaconvolve(x, shape[::-1], mode="valid") / e
+        r = ri if r is None else np.maximum(r, ri)
+    return r
 
 
-def _xcorr_peak(seg: np.ndarray, shape: np.ndarray) -> tuple[float, float]:
-    """Best fractional lag of `shape` inside `seg` and its normalised correlation."""
-    L = len(shape)
-    c = np.correlate(seg, shape, mode="valid")
-    # normalise by the local energy of seg so the score is a true 0..1 similarity
-    seg2 = np.concatenate(([0.0], np.cumsum(seg * seg)))
-    seg1 = np.concatenate(([0.0], np.cumsum(seg)))
-    e = seg2[L:] - seg2[:-L] - (seg1[L:] - seg1[:-L]) ** 2 / L
-    r = c / np.sqrt(np.maximum(e, 1e-30))
-    k = int(np.argmax(r))
-    frac = 0.0
-    if 0 < k < len(r) - 1:
-        y0, y1, y2 = r[k - 1], r[k], r[k + 1]
-        den = y0 - 2 * y1 + y2
-        if den < 0:
-            frac = 0.5 * (y0 - y2) / den
-    return k + frac, float(r[k])
+def detect(x: np.ndarray, tpl: SyncTemplate, period: float, min_score: float = 0.6) -> tuple[np.ndarray, np.ndarray]:
+    """Sync pulses in `x`: (positions, scores).
 
-
-def _frac_window(x: np.ndarray, p: float, pre: int, post: int) -> np.ndarray:
-    """Samples x[p-pre : p+post] at fractional start p (linear interpolation)."""
-    i = int(np.floor(p))
-    f = p - i
-    a = x[i - pre : i + post + 1]
-    return (1 - f) * a[:-1] + f * a[1:]
+    Every local maximum of the match above `min_score` is returned (only
+    maxima closer than 2 % of a line are merged). Several may fall within one
+    line - on a band-limited copy a picture edge can match nearly as well as
+    the sync pulse - and the line tracker picks the one that fits the line
+    rhythm. Each position is refined with a parabola through the three
+    highest points.
+    """
+    if len(x) < 2 * tpl.length:
+        return np.empty(0), np.empty(0)
+    r = match(x, tpl)
+    k, _ = ss.find_peaks(r, height=min_score, distance=max(1, int(0.02 * period)))
+    k = k[(k > 0) & (k < len(r) - 1)]
+    # keep at most the 3 best peaks in every half-line stretch
+    if len(k):
+        bucket = (k // max(1, int(0.5 * period))).astype(np.int64)
+        order = np.lexsort((-r[k], bucket))
+        rank = np.zeros(len(k), int)
+        b_sorted = bucket[order]
+        start = np.r_[0, np.flatnonzero(np.diff(b_sorted)) + 1]
+        for a, b in zip(start, np.r_[start[1:], len(order)]):
+            rank[order[a:b]] = np.arange(b - a)
+        k = np.sort(k[rank < 3])
+    y0, y1, y2 = r[k - 1], r[k], r[k + 1]
+    den = y0 - 2 * y1 + y2
+    frac = np.where(den < 0, 0.5 * (y0 - y2) / np.where(den < 0, den, -1), 0.0)
+    return k + frac + tpl.pre, y1
 
 
 # --------------------------------------------------------------------------
@@ -217,74 +311,6 @@ class LineTrack:
 
     def __len__(self) -> int:
         return len(self.times)
-
-
-def two_line_distances(times: np.ndarray, guess: float) -> np.ndarray:
-    """For every candidate, the distance to the candidate closest to two lines later.
-
-    Over two lines the sync stagger cancels, so these distances cluster
-    tightly at 2 x the line period, whatever the stagger.
-    """
-    t = np.sort(np.asarray(times, dtype=float))
-    lo = np.searchsorted(t, t + 1.6 * guess)
-    hi = np.searchsorted(t, t + 2.4 * guess)
-    d = []
-    for i in np.flatnonzero(hi > lo):
-        cand = t[lo[i] : hi[i]] - t[i]
-        d.append(cand[np.argmin(np.abs(cand - 2 * guess))])
-    return np.asarray(d)
-
-
-def estimate_period(times: np.ndarray, guess: float, n_best: int = 1):
-    """Line period(s) of the most common line rhythms among the candidates.
-
-    The recording also contains lead-in signals with a slightly different
-    rhythm (and more transients per line), so we histogram the two-line
-    distances (0.5-sample bins) and return the `n_best` strongest, clearly
-    separated peaks, each refined by the median of the distances within
-    +-0.2 % of it and halved. With n_best=1 a single float is returned.
-    """
-    d = two_line_distances(times, guess)
-    if len(d) < 8:
-        raise ValueError("Could not find a regular line rhythm near the expected period.")
-    bins = np.arange(d.min(), d.max() + 1.0, 0.5)
-    if len(bins) < 3:
-        out = [float(np.median(d) / 2)]
-    else:
-        h, e = np.histogram(d, bins=bins)
-        centres = 0.5 * (e[:-1] + e[1:])
-        out = []
-        for i in np.argsort(h)[::-1]:
-            c = centres[i]
-            if h[i] < 8 or any(abs(c / (2 * o) - 1) < 0.003 for o in out):
-                continue
-            near = d[np.abs(d / c - 1) < 0.002]
-            out.append(float(np.median(near) / 2))
-            if len(out) >= n_best:
-                break
-    return out[0] if n_best == 1 else out
-
-
-def staggered(times: np.ndarray, period: float) -> np.ndarray:
-    """Mask of candidates that take part in the staggered picture-line rhythm.
-
-    In picture lines consecutive sync intervals alternate around the period
-    (long, short, long ... by ~3 % each way) and two of them add up to two
-    periods. Lead-in signals and picture-content edges do not do this, so the
-    mask picks out genuine picture sync pulses, e.g. for building the template.
-    """
-    t = np.sort(np.asarray(times, dtype=float))
-    m = np.zeros(len(t), bool)
-    if len(t) < 3:
-        return m
-    d1 = t[1:-1] - t[:-2]
-    d2 = t[2:] - t[1:-1]
-    dev1, dev2 = d1 / period - 1, d2 / period - 1
-    ok = ((np.abs(dev1) > 0.01) & (np.abs(dev1) < 0.06) & (np.sign(dev1) == -np.sign(dev2))
-          & (np.abs((d1 + d2) / (2 * period) - 1) < 0.003))
-    idx = np.flatnonzero(ok)
-    m[idx] = m[idx + 1] = m[idx + 2] = True
-    return m
 
 
 def track_lines(
@@ -365,8 +391,15 @@ def track_lines(
             runs.append((np.array(run_t), np.array(run_m), np.array(run_s)))
             used[taken] = True
 
-    # resolve overlaps: best (most measured pulses) first
-    runs.sort(key=lambda r: -int(r[1].sum()))
+    # resolve overlaps. Picture runs show the sync stagger (intervals
+    # alternating long/short by ~3 %); a run that followed a picture edge
+    # instead does not, because picture content sits on an even grid. So
+    # staggered runs win, then the one with the most measured pulses.
+    def staggered(r):
+        d = np.diff(r[0])
+        return len(d) > 8 and abs(np.mean(d[0::2]) - np.mean(d[1::2])) / 4 > 0.005 * period
+
+    runs.sort(key=lambda r: (not staggered(r), -int(r[1].sum())))
     accepted = []
     for r in runs:
         a, b = r[0][0], r[0][-1]

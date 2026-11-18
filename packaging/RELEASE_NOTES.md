@@ -1,3 +1,8 @@
+## New in 1.1
+
+* Sync detection works at any sample rate and on band-limited copies (44.1 kHz, 20 kHz low-pass): pulse templates are learned from the recording.
+* New **Sync detection** settings (template length, minimum match, edge scale) with a **Re-analyse** button, and a **Sync template** diagnostics tab.
+
 ## Install (Windows)
 
 1. Download **GoldenRecordDecoder-…-windows.zip** below (under *Assets*).
