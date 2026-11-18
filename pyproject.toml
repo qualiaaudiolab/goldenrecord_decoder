@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grdecoder"
-version = "1.1.0"
+version = "1.1.1"
 description = "Decoder for the pictures of the Voyager Golden Record, with sync-locked wow/flutter correction"
 readme = "README.md"
 license = { text = "MIT" }

@@ -8,7 +8,7 @@
 Decodes the 116 pictures of the **Voyager Golden Record** from a recording of
 its picture section, and corrects the analogue faults of the recording on the
 way: wow and flutter, low-frequency loss ("droop"), line-to-line level
-jumps, and the interlaced field offset.
+jumps, and the staggered sync of the interlaced fields.
 
 ![screenshot](docs/images/screenshot.png)
 
@@ -40,8 +40,8 @@ chain leaves dark shadows and halos. This decoder:
   continuous time axis, so speed errors are corrected even inside a line.
 * **understands the staggered sync.** On the master tape, sync pulses
   alternate early/late by ±131 µs while the picture itself does not. The
-  decoder removes the stagger, aligns the two interlaced fields and evens
-  out their brightness.
+  decoder removes the stagger and evens out the brightness of the two
+  fields.
 * **undoes the droop.** It measures the recording chain's high-pass time
   constant from the flat tops of the sync pulses and applies the exact
   inverse filter.
@@ -119,7 +119,8 @@ grdecoder                      # start the app
 | Mode | *Sync-locked, smoothed* (default), *per line*, or *Fixed speed* (classic) |
 | Correction bandwidth | how fast a speed variation is still corrected (default 40 Hz; the line rate is 120 Hz) |
 | Speed trim | fixed-speed mode only: manual fine-tuning of the playback speed |
-| Remove sync stagger / Align fields / Equalise field levels | the interlace corrections |
+| Remove sync stagger / Equalise field levels | the interlace corrections (on by default) |
+| Align fields (experimental) | measures and removes a vertical offset between even and odd lines. Off by default: on the master tape the fields already line up after removing the stagger |
 | Droop correction, time constant | undo the low-frequency loss; *auto* measures it per picture |
 | Line clamp | remove line-to-line level jumps (vertical streaks) |
 | Invert | on this recording a higher signal means darker (default on) |

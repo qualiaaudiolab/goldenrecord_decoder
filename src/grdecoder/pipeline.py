@@ -55,7 +55,11 @@ class DecodeSettings:
     smooth_hz: float = 40.0         # correction bandwidth in mode "smooth"
     destagger: bool = True          # move staggered sync pulses onto an even grid
     speed_trim: float = 1.0         # mode "fixed" only: playback-speed fine trim
-    field_align: bool = True        # auto-align the two interlaced fields (position)
+    # Off by default: after destaggering, the picture content of the two fields
+    # already lines up (checked on the calibration circle). The automatic
+    # measurement is fooled by a fine periodic texture whose phase differs
+    # between fields, so turning this on makes edges jagged on the master tape.
+    field_align: bool = False       # experimental: auto-align the two interlaced fields
     field_level: bool = True        # equalise the brightness of the two fields
     # signal
     droop: bool = True              # undo the low-frequency loss (AC coupling)

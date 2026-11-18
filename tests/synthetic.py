@@ -30,6 +30,8 @@ def make_recording(
     tau: float | None = 0.6e-3,
     noise: float = 0.002,
     seed: int = 1,
+    field_shift: float = 0.0,
+    square: bool = False,
 ):
     """Return (signal, truth) where truth is a dict of what was put in.
 
@@ -50,7 +52,12 @@ def make_recording(
     x = np.zeros(total)
 
     is_pic = (k >= lines_before) & (k < lines_before + lines_picture)
-    stripes = 0.25 * np.sin(2 * np.pi * 3 * (u - 0.115) / 0.8)
+    # odd lines' content can sit `field_shift` (fraction of a line) later,
+    # like the two interlaced fields on the master tape
+    uf = u - field_shift * (k % 2)
+    stripes = 0.25 * np.sin(2 * np.pi * 3 * (uf - 0.115) / 0.8)
+    if square:  # sharp edges, e.g. to measure the field offset
+        stripes = 0.25 * np.sign(stripes)
     active = (u >= 0.115) & (u < 0.915)
     x[is_pic & active] = stripes[is_pic & active]
     # start marker: 21 hatched lines right before the picture
@@ -85,5 +92,5 @@ def make_recording(
         y = ss.lfilter([a, -a], [1.0, -a], y)
     y = y + noise * rng.standard_normal(len(y))
     truth = dict(fs=fs, lines_before=lines_before, lines_picture=lines_picture, stagger=stagger,
-                 tau=tau, warp_t=t, warp=warp, stripes_cycles=3)
+                 field_shift=field_shift, tau=tau, warp_t=t, warp=warp, stripes_cycles=3)
     return y.astype(np.float32), truth
