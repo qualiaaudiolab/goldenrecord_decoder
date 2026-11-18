@@ -50,9 +50,16 @@ two apart match perfectly. So the sync pulses are deliberately displaced
 early/late around an even grid, and the picture is not. The decoder moves
 every pulse back onto the grid before using it (`timebase.destagger`).
 
-After that there is still a small, consistent vertical offset between the
-two fields (even and odd lines) of about ±1.85 rows at 768 rows. The decoder
-measures it from the picture itself and removes it (`render.measure_field_offset`).
+After destaggering, the picture content of the two fields (even and odd
+lines) lines up: on the edge of the calibration circle the even and odd
+columns agree to within 0.2 rows at 768 rows. Version 1.0 also "aligned the
+fields" by cross-correlating them, which reported a consistent offset of
+about ±1.85 rows. That figure does not come from the picture. The signal
+carries a fine periodic texture (period about 32 rows, roughly 3.6 kHz)
+whose phase differs between the two fields, and the correlation locked onto
+it; applying the shift made edges jagged. The option is kept
+(`render.measure_field_offset`, *Align fields (experimental)*) but is off by
+default.
 Even and odd lines also differ slightly in brightness (3–6 % of full scale),
 probably because their sync pulses differ and the chain was AC-coupled;
 this shows as fine vertical stripes and is equalised (`render.equalise_fields`).
@@ -251,8 +258,11 @@ It is not on the tape:
 
 ## 7. Open questions
 
-* **Why the fields are offset** by ~1.85 rows after destaggering, and
-  whether the cover's interlace drawing intends a specific half-line shift.
+* **Why the sync pulses are staggered** by ±131 µs while the picture is not.
+  A field marker for the receiver is the most likely reason; no Colorado
+  Video documentation has been found to confirm it.
+* **The fine periodic texture** (~3.6 kHz) whose phase differs between the
+  two fields: where it enters the chain.
 * **Droop model.** A single high-pass pole explains most of the low-frequency
   loss; the chain may have more than one (camera, CVI device, tape recorder).
 * **Nominal line period.** 1/120 s is an inference from the measured period

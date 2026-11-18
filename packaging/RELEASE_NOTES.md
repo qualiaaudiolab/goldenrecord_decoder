@@ -1,3 +1,7 @@
+## New in 1.1.1
+
+* **Align fields** is now off by default and marked experimental. On the master tape the fields already line up once the sync stagger is removed; the automatic alignment was misled by a fine texture in the signal and made edges jagged (thanks to Carlos for spotting it on the calibration circle). It also used the wrong line parity on pictures that start on an odd line.
+
 ## New in 1.1
 
 * Sync detection works at any sample rate and on band-limited copies (44.1 kHz, 20 kHz low-pass): pulse templates are learned from the recording.

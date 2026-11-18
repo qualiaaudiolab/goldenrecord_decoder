@@ -358,7 +358,11 @@ class MainWindow(QtWidgets.QMainWindow):
         f.addRow("Speed trim (fixed)", self.w_trim)
         self.w_destagger = QtWidgets.QCheckBox("Remove sync stagger")
         f.addRow(self.w_destagger)
-        self.w_field = QtWidgets.QCheckBox("Align interlaced fields")
+        self.w_field = QtWidgets.QCheckBox("Align fields (experimental)")
+        self.w_field.setToolTip("Measures a vertical offset between even and odd lines and removes it.\n"
+                                "Off by default: on the master tape the fields already line up after\n"
+                                "removing the stagger, and the measurement is misled by a fine texture\n"
+                                "in the signal. Leave off unless edges show a comb pattern.")
         f.addRow(self.w_field)
         self.w_flevel = QtWidgets.QCheckBox("Equalise field levels")
         f.addRow(self.w_flevel)
@@ -884,7 +888,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ro_terr.setText(f"{np.std(e):.1f} / {np.ptp(e):.0f} µs")
         self.ro_sync.setText(f"{r.picture.sync_found * 100:.1f} %")
         self.ro_stagger.setText(f"{r.stagger / fs * 1e6:+.1f} µs")
-        self.ro_field.setText(f"{r.field_offset_rows:+.2f} rows")
+        self.ro_field.setText(f"{r.field_offset_rows:+.2f} rows" if r.settings.field_align else "not applied")
         self.ro_tau.setText(f"{r.droop_tau_ms:.3f} ms" if r.droop_tau_ms else "off")
 
     def _update_plots(self):

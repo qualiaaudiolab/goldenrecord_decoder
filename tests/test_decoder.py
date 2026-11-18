@@ -131,3 +131,24 @@ def test_other_copies(tmp_path, variant):
     inj = np.interp(t, truth["warp_t"], truth["warp"])
     res = (t - np.polyval(np.polyfit(q, t, 1), q)) - (inj - np.polyval(np.polyfit(q, inj, 1), q))
     assert res.std() < 2e-6, res.std()
+
+
+@pytest.mark.parametrize("start", [0, 1])
+def test_field_alignment(tmp_path, start):
+    """Interlaced fields offset by ~2 rows are measured and brought into line,
+    whether the picture starts on an even or an odd line of its run."""
+    from grdecoder.render import measure_field_offset
+
+    shift = 0.002  # fraction of a line; ~1.9 rows at 768 rows over 0.8 of a line
+    y, truth = make_recording(field_shift=shift, square=True, wow=(), tau=None)
+    path = tmp_path / "fields.wav"
+    sf.write(path, y, truth["fs"], subtype="FLOAT")
+    dec = Decoder(path)
+    dec.analyse(channels=(0,))
+    p = dec.pictures[0]
+    # move the picture start by one line to test both parities
+    p = replace(p, first_line=p.first_line + start, n_lines=p.n_lines - start)
+    off = dec.render(p, DecodeSettings(field_align=False, field_level=False, droop=False))
+    on = dec.render(p, DecodeSettings(field_align=True, field_level=False, droop=False))
+    assert abs(measure_field_offset(off.image)) > 1.4
+    assert abs(measure_field_offset(on.image)) < 0.3
