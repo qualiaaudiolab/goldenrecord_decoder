@@ -5,7 +5,7 @@ pipeline.py - the decoder as one object: analyse a file, then render pictures.
     dec.analyse()                      # find all pictures on both channels
     pic = dec.pictures[0]
     out = dec.render(pic, DecodeSettings())
-    out.image                          # float array (rows, 512)
+    out.image                          # float array (rows, lines); ~535 lines
 
 Everything the GUI and the command-line tool do goes through this class.
 """
@@ -108,6 +108,7 @@ class Picture:
 
     @property
     def name(self) -> str:
+        """Short label: channel letter and number, e.g. "L001"."""
         return f"{'LR'[self.channel]}{self.number:03d}"
 
 
@@ -134,6 +135,7 @@ class Rendered:
         return (nominal / self.period_samples - 1.0) * 1e6
 
     def timing_error_us(self, which: str = "raw") -> np.ndarray:
+        """Per-line timing error of the picture in µs ("raw" as measured, else as applied)."""
         e = self.timebase.error_raw if which == "raw" else self.timebase.error_used
         return e[self.lines] / self.fs * 1e6
 

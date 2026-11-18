@@ -108,6 +108,7 @@ class Player:
             self._stream.start()
 
     def stop(self) -> None:
+        """Stop playback and release the sound device."""
         self._stop.set()
         if self._stream is not None:
             try:

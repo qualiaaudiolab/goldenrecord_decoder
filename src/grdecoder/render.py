@@ -125,9 +125,8 @@ def sample_picture(
     k = first_line + np.arange(n_lines)  # (W,)
     q = k[None, :] + u[:, None]  # (H, W)
     t = tb(q.ravel()).reshape(q.shape)
-    # parity by column of the picture, not by line number in the run: the
-    # offset is measured on picture columns (see measure_field_offset), and a
-    # picture can start on an odd run line
+    # Parity is counted along the picture's own columns, the same way
+    # measure_field_offset counts it (a picture can start on an odd run line).
     fshift = np.where(np.arange(n_lines) % 2 == 0, 0.5, -0.5)[None, :] * field_offset
     img = np.interp(t + fshift - a, np.arange(len(x)), x)
     if clamp is not None:

@@ -54,6 +54,7 @@ class AudioSource:
 
     @property
     def fs(self) -> int:
+        """Sample rate of the file in Hz."""
         return self.info.samplerate
 
     def read(self, channel: int, start: int, stop: int) -> np.ndarray:

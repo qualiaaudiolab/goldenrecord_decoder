@@ -23,11 +23,13 @@ the method does not rely on that. It works in three steps:
    align consecutive line pairs to each other by cross-correlating whole
    pairs (neighbouring lines of a picture look alike), and average them.
    Picture content averages away, the sync structure that repeats every two
-   lines remains, sharp. The template is cut from that average, around its
-   steepest rising edge.
-3. `detect` - normalised cross-correlation of the whole signal with the
-   template (a matched filter). Every local maximum above `min_score` is a
-   sync pulse, located to a fraction of a sample by parabolic interpolation.
+   lines remains, sharp. Two templates are cut from that average, one per
+   field (the two fields start with differently shaped pulses), from just
+   before each rising edge to `template_width` of a line after it.
+3. `detect` - normalised cross-correlation of the whole signal with both
+   templates (a matched filter). Local maxima above `min_score` are sync
+   pulse candidates, located to a fraction of a sample by parabolic
+   interpolation; the tracker then picks the ones that follow the rhythm.
 
 Then `track_lines` follows the line rhythm through the detections, bridges
 dropouts and splits the recording into runs of consecutive lines.
@@ -207,10 +209,12 @@ class SyncTemplate:
 
     @property
     def length(self) -> int:
+        """Template length in samples."""
         return self.pre + self.post
 
     @property
     def shape(self) -> np.ndarray:  # the first waveform, for display
+        """The first (main) template shape."""
         return self.shapes[0]
 
 

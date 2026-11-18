@@ -3,8 +3,8 @@
 This document explains what the picture signal looks like, what goes wrong
 with it on tape, and what each processing step does about it. Every number
 below was measured on a 384 kHz / 32-bit float stereo transfer of the 1977
-master tape of the picture section (two excerpts: the first 90 s and 30 s
-from the middle). Where something is a hypothesis rather than a measurement,
+master tape of the picture section (four excerpts: the first 90 s, 30 s and
+112 s from the middle, and the last 88 s). Where something is a hypothesis rather than a measurement,
 it says so.
 
 Contents
@@ -25,7 +25,12 @@ The record cover explains the encoding: each picture is drawn as
 **512 vertical lines** of roughly 8 ms each, like television turned
 on its side. The pictures were converted to audio in 1977 by Colorado Video
 Inc. with a slow-scan television device built to send still pictures over
-telephone lines.
+telephone lines, and recorded on a Honeywell 5600-C instrumentation tape
+recorder lent by its manufacturer. A few pages added at the last minute
+(President Carter's message and a list of members of Congress) needed a
+second session with the same recorder (Carl Sagan's account in *Murmurs of
+Earth*). Those pages are not in the picture section of this transfer: it
+ends with the last of the 116 pictures, the violin with the Cavatina score.
 
 What the master tape actually carries:
 
@@ -52,14 +57,15 @@ every pulse back onto the grid before using it (`timebase.destagger`).
 
 After destaggering, the picture content of the two fields (even and odd
 lines) lines up: on the edge of the calibration circle the even and odd
-columns agree to within 0.2 rows at 768 rows. Version 1.0 also "aligned the
-fields" by cross-correlating them, which reported a consistent offset of
-about ±1.85 rows. That figure does not come from the picture. The signal
-carries a fine periodic texture (period about 32 rows, roughly 3.6 kHz)
-whose phase differs between the two fields, and the correlation locked onto
-it; applying the shift made edges jagged. The option is kept
-(`render.measure_field_offset`, *Align fields (experimental)*) but is off by
-default.
+columns agree to within 0.2 rows at 768 rows, so no further alignment is
+needed. An automatic alignment by cross-correlating the two fields is
+available (`render.measure_field_offset`, *Align fields (experimental)*) but
+off by default: on this recording it reports a consistent offset of about
+±1.85 rows that does not come from the picture. The signal carries a fine
+periodic texture (period about 32 rows, roughly 3.6 kHz) whose phase
+differs between the two fields, and the correlation locks onto it; applying
+the shift makes edges jagged.
+
 Even and odd lines also differ slightly in brightness (3–6 % of full scale),
 probably because their sync pulses differ and the chain was AC-coupled;
 this shows as fine vertical stripes and is equalised (`render.equalise_fields`).
@@ -72,10 +78,10 @@ WAV ──► find candidates ──► line period ──► learn templates �
                              distances)       one per field)      sub-sample, score)
                                                      │
         pictures ◄── picture finder ◄── line runs ◄──┘
-        (512 lines)  (blanking structure) (flywheel tracker, dropout bridging)
+        (512+ lines) (blanking structure) (flywheel tracker, dropout bridging)
             │
             ▼
-   destagger ─► timebase ─► droop correction ─► sample pixels ─► clamp ─► field align ─► tone map
+   destagger ─► timebase ─► droop correction ─► sample pixels ─► clamp ─► field levels ─► tone map
 ```
 
 | Step | Module | What it does |
@@ -93,14 +99,13 @@ picture at 768 rows ~0.3 s.
 
 ### Other sample rates and band-limited copies
 
-Version 1.0 measured each pulse with a short template (±1 % of a line)
-around the steepest point of the edge. At 384 kHz that is ample, but in a
-44.1 kHz or 20 kHz-limited copy the edge is smeared over more than that and
-picture edges look just as sync-like, so pictures were lost. Since 1.1 the
-templates are learned from the recording, are longer (4 % of a line, which
-includes the pulse's flat top or the beginning of the blanking that follows),
-and the tracker prefers runs of pulses that show the stagger. Measured on the
-90 s excerpt with default settings:
+A short template around the steepest point of the edge (±1 % of a line) is
+ample at 384 kHz, but in a 44.1 kHz or 20 kHz-limited copy the edge is
+smeared over more than that and picture edges look just as sync-like. That
+is why the templates are learned from the recording itself and are longer
+(4 % of a line, which includes the pulse's flat top or the beginning of the
+blanking that follows), and why the tracker prefers runs of pulses that show
+the stagger. Measured on the 90 s excerpt with default settings:
 
 | Copy | Pictures | Pulses predicted (not found) | Sync timing noise |
 |---|---|---|---|
@@ -125,7 +130,7 @@ Measured on 25 complete pictures:
 |---|---|---|
 | timing error, rms | 21 µs | 9–52 µs |
 | timing error, peak-to-peak | 95 µs | up to 212 µs |
-| mean speed vs 120 Hz lines | +700 to +1500 ppm | drifts slowly through the file |
+| mean speed vs 120 Hz lines | +700 to +2100 ppm | rises slowly from the start to the end of the reel, on both tracks |
 
 95 µs peak-to-peak is ~1.1 % of a line: enough to bend straight edges and
 smear detail. The error spectrum has most of its energy below 5 Hz (wow),
@@ -215,9 +220,8 @@ stable from picture to picture.
 
 ![droop correction off (left) and on (right)](images/droop_ab.png)
 
-*Droop correction off (left) and on (right). With it on, Mars sits on black
-space instead of a grey gradient, and the people in the third picture lose
-their light halos.*
+*Droop correction off (left) and on (right), on Mars and Mercury. With it
+on, the planets sit on black space instead of a grey gradient.*
 
 After droop correction, a per-line **clamp** subtracts the level of the
 "back porch" (5.5–10 % of the line, just after the sync pulse) to remove the
@@ -233,16 +237,17 @@ drawings are dark on white. Inversion is the default.
 decoding can be checked. With the default active window (0.115–0.915 of a
 line), the circle is round at a display aspect of **1.485** (width / height,
 defined for a width of 512 lines; pictures with more lines get proportionally
-wider).
-"Calibrate aspect from circle" in the app measures it again for other
-settings (`render.measure_circle_aspect`).
+wider). "Calibrate aspect from circle" in the app measures it again for other
+settings (`render.measure_circle_aspect`): it fits an ellipse to the ring's
+pixels, away from the bright and dark edges of the framed area, and refuses
+pictures that are not a complete ring.
 
 **Colour.** Colour pictures were recorded as three separate frames of the
-same scene, one after another. The decoder flags candidates by comparing
-blurred edge maps of neighbouring pictures (separations share edges but not
-brightness) and registers the three frames to each other before combining
-them. Colour pictures were recorded as red, green and blue frames, in that order
-(the decoder's default; the app still lets you try the other orders). The
+same scene, red, green and blue, in that order (the decoder's default; the
+app still lets you try the other orders). The decoder flags candidates by
+comparing blurred edge maps of neighbouring pictures (separations share
+edges but not brightness) and registers the three frames to each other
+before combining them. The
 solar spectrum (three frames in which a bright band moves across) cannot be
 detected this way, because its separations differ in content; combine it by
 hand.

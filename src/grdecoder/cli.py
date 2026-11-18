@@ -25,6 +25,7 @@ from .render import auto_levels, combine_colour, resize_columns, tone_map
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Command-line parser; every DecodeSettings / SyncSettings field becomes an option."""
     p = argparse.ArgumentParser(prog="grdecoder", description="Voyager Golden Record picture decoder")
     sub = p.add_subparsers(dest="command")
 
@@ -61,6 +62,7 @@ def _bool(s: str) -> bool:
 
 
 def decode(args) -> int:
+    """Analyse a recording and write every picture, colour composites and a report."""
     st = DecodeSettings(**{f.name: getattr(args, f.name) for f in fields(DecodeSettings)})
     sync_st = SyncSettings(**{f.name: getattr(args, "sync_" + f.name) for f in fields(SyncSettings)})
     dec = Decoder(args.wav, sync_settings=sync_st)
@@ -142,6 +144,7 @@ def selftest(args) -> int:
 
 def main(argv=None) -> int:
     # a windowed .exe has no console: give print() somewhere harmless to write
+    """Entry point: run a subcommand, or start the GUI when there is none."""
     if sys.stdout is None:
         sys.stdout = open(os.devnull, "w")
     if sys.stderr is None:

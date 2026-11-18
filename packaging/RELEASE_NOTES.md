@@ -1,15 +1,14 @@
-## New in 1.1.2
+## Golden Record Decoder 1.2
 
-* **Calibrate aspect from circle** fixed. It mistook the bright edge of the framed area for the ring and set the aspect far too low, shrinking every picture. The ring is now found by fitting an ellipse to it, away from the frame edges, and the button refuses pictures that are not the circle. On the master tape it confirms the default, 1.485.
+Decodes the pictures of the Voyager Golden Record from a recording of its picture section, with the tape's timing errors corrected line by line.
 
-## New in 1.1.1
+* Finds every picture on both channels and locks to every sync pulse, learning the pulse shape from the recording itself, so 384 kHz, 44.1 kHz and band-limited copies all decode.
+* Corrects wow and flutter, the staggered sync of the interlaced fields, low-frequency loss ("droop") and line-to-line level jumps.
+* Calibrates the aspect ratio on the calibration circle and combines colour separations.
+* Plays the recording while the picture is drawn line by line in step with the sound.
+* Shows its working: timing error, speed, line scope, picture finder and sync template.
 
-* **Align fields** is now off by default and marked experimental. On the master tape the fields already line up once the sync stagger is removed; the automatic alignment was misled by a fine texture in the signal and made edges jagged (thanks to Carlos for spotting it on the calibration circle). It also used the wrong line parity on pictures that start on an odd line.
-
-## New in 1.1
-
-* Sync detection works at any sample rate and on band-limited copies (44.1 kHz, 20 kHz low-pass): pulse templates are learned from the recording.
-* New **Sync detection** settings (template length, minimum match, edge scale) with a **Re-analyse** button, and a **Sync template** diagnostics tab.
+The recording is not included. See the README and `docs/HOW_IT_WORKS.md` for details.
 
 ## Install (Windows)
 
@@ -22,5 +21,3 @@
 
 **Open…** (or drag a WAV/FLAC onto the window) → the pictures appear on the left → click one to decode it.
 Defaults are the recommended settings; **A/B: uncorrected** shows the plain decode for comparison.
-
-See the README and `docs/HOW_IT_WORKS.md` in the repository for details.
