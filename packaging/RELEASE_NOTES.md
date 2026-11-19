@@ -1,3 +1,8 @@
+## Golden Record Decoder 1.2.1
+
+* Smooth playback: the picture is drawn and the playback position updated about 60 times per second, instead of jumping with each block of audio the sound card asks for.
+* New signal strip under the picture: the waveform of the line being played, like an oscilloscope on the decoder's input. When stopped, it shows the line you click.
+
 ## Golden Record Decoder 1.2
 
 Decodes the pictures of the Voyager Golden Record from a recording of its picture section, with the tape's timing errors corrected line by line.

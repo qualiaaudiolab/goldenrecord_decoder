@@ -76,6 +76,9 @@ class Player:
         self._q: queue.Queue = queue.Queue(maxsize=12)
         self._pending = np.zeros((0, 2), dtype=np.float32)
         self._frames_played = 0
+        self._cb_frames = 0       # frames handed out before the latest callback's block
+        self._cb_wall = 0.0       # perf_counter() at the latest callback
+        self._last_pos = 0.0      # last reported position (kept monotonic)
         self._t0 = 0.0
         self._wall0 = 0.0
         self.fs_out = 48000
@@ -89,6 +92,9 @@ class Player:
         self._q = queue.Queue(maxsize=12)
         self._pending = np.zeros((0, 2), dtype=np.float32)
         self._frames_played = 0
+        self._cb_frames = 0
+        self._cb_wall = 0.0
+        self._last_pos = self._t0
         self._wall0 = time.perf_counter()
         self.audio_ok = False
         if sd is not None:
@@ -124,8 +130,19 @@ class Player:
     def position(self) -> float:
         """Current playback position in the file, in seconds."""
         if self.audio_ok and self._stream is not None:
+            # The sound card asks for audio in blocks, often 100-200 ms long on
+            # Windows. Counting whole blocks would make the position (and the
+            # picture drawn from it) advance in jumps, so the position inside
+            # the current block is interpolated from the wall clock, never past
+            # the end of the audio handed out so far, and never backwards.
             lat = self._stream.latency if np.isscalar(self._stream.latency) else self._stream.latency[0]
-            return self._t0 + max(0.0, self._frames_played / self.fs_out - lat)
+            if self._cb_wall == 0.0:
+                return self._t0
+            frames = self._cb_frames + (time.perf_counter() - self._cb_wall) * self.fs_out
+            frames = min(frames, self._frames_played)
+            pos = self._t0 + max(0.0, frames / self.fs_out - lat)
+            self._last_pos = max(self._last_pos, pos)
+            return self._last_pos
         return self._t0 + (time.perf_counter() - self._wall0)
 
     # -------------------------------------------------------------- internals
@@ -174,4 +191,6 @@ class Player:
         outdata[:k] = self._pending[:k] * self.volume
         outdata[k:] = 0
         self._pending = self._pending[k:]
+        self._cb_frames = self._frames_played
+        self._cb_wall = time.perf_counter()
         self._frames_played += frames
