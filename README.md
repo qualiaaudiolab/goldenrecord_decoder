@@ -20,11 +20,12 @@ band-limited copies decode as well: on the 90 s excerpt all 26 pictures are
 found at 384 kHz, after a 20 kHz low-pass and at 44.1 kHz, with sync timing
 noise of 1.8, 2.0 and 2.1 µs.
 
-![first 26 pictures, decoded](docs/images/contact_sheet.png)
+![three decoded pictures: the calibration circle, Mercury and Mars](docs/images/pictures.jpg)
 
-*The first 26 pictures from the first 90 s of the master-tape transfer, both
-channels, with default settings. The last two are colour pictures that were
-detected and combined automatically.*
+*Three pictures decoded from the master-tape transfer with default settings:
+the calibration circle (© Jon Lomberg, shown with his permission), Mercury
+and Mars (NASA). The other pictures on the record belong to their
+photographers and artists, so they are not reproduced here.*
 
 ## What it does differently
 
@@ -56,9 +57,12 @@ The full explanation, with the measurements behind every default, is in
 
 ## Getting the recording
 
-The recording is **not included** in this repository. The picture data
-from the original master tapes was published by Ozma Records with their 2017
-Voyager Golden Record reissue.
+The recording is **not included** in this repository, and no pictures from
+the record are bundled with the program. You need your own recording of the
+picture section, ideally a lossless (WAV or FLAC) copy of the master-tape
+transfer that Ozma Records made for the 2017 reissue. Lossy copies decode
+too, with more noise. The pictures and the recording belong to their rights
+holders; check before you publish decoded pictures.
 
 ## Installation
 
@@ -95,7 +99,7 @@ grdecoder                      # start the app
 ## Using the app
 
 1. **Open…** (or drag a file onto the window). The app scans both channels
-   and lists the pictures it finds (about 6 s per 90 s of stereo 384 kHz
+   and lists the pictures it finds (about 14 s per 90 s of stereo 384 kHz
    audio).
 2. Click a picture to decode it. The defaults are the recommended settings.
 3. **A/B: uncorrected** shows the same picture decoded the plain way
@@ -120,7 +124,7 @@ grdecoder                      # start the app
 | Correction bandwidth | how fast a speed variation is still corrected (default 40 Hz; the line rate is 120 Hz) |
 | Speed trim | fixed-speed mode only: manual fine-tuning of the playback speed |
 | Remove sync stagger / Equalise field levels | the interlace corrections (on by default) |
-| Align fields (experimental) | measures and removes a vertical offset between even and odd lines. Off by default: on the master tape the fields already line up after removing the stagger |
+| Align fields (experimental) | measures and removes a vertical offset between even and odd lines. Off by default: on the master tape the fields already line up once the stagger is removed |
 | Droop correction, time constant | undo the low-frequency loss; *auto* measures it per picture |
 | Line clamp | remove line-to-line level jumps (vertical streaks) |
 | Invert | on this recording a higher signal means darker (default on) |
@@ -173,3 +177,4 @@ pictures belong to their owners and are not part of this repository.
 * Ron Barry — first public decoding write-up (2017), which made the image data widely known.
 * Frank Drake, Valentin Boriakoff and Colorado Video Inc. — the 1977 picture encoding.
 * Jon Lomberg — design director of the Golden Record, including the calibration circle the decoder uses to set the aspect ratio.
+* NASA/JPL-Caltech — photograph of the record cover, used for the app icon; Mercury and Mars pictures in this README.

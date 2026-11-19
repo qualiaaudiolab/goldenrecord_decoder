@@ -76,6 +76,7 @@ class Task(QtCore.QRunnable):
             pass
 
     def run(self) -> None:
+        """Run the job in a worker thread and report the result through signals."""
         try:
             try:
                 res = self.fn(*self.args, task=self)
@@ -91,6 +92,7 @@ class Task(QtCore.QRunnable):
 # small widget helpers
 # ==========================================================================
 def readout(text: str = "—") -> QtWidgets.QLabel:
+    """Right-aligned, monospaced label for a measured value."""
     lab = QtWidgets.QLabel(text)
     lab.setObjectName("readout")
     lab.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
@@ -98,6 +100,7 @@ def readout(text: str = "—") -> QtWidgets.QLabel:
 
 
 def dspin(lo, hi, val, step, dec, suffix="") -> QtWidgets.QDoubleSpinBox:
+    """Double spin box with range, default, step, decimals and unit suffix."""
     s = QtWidgets.QDoubleSpinBox()
     s.setRange(lo, hi)
     s.setDecimals(dec)
@@ -109,6 +112,7 @@ def dspin(lo, hi, val, step, dec, suffix="") -> QtWidgets.QDoubleSpinBox:
 
 
 def styled_plot(ylabel: str, xlabel: str) -> pg.PlotWidget:
+    """pyqtgraph plot widget in the app's scope-like style."""
     p = pg.PlotWidget()
     p.showGrid(x=True, y=True, alpha=0.12)
     p.setLabel("left", ylabel)
@@ -149,6 +153,7 @@ def to_qimage(img01: np.ndarray) -> QtGui.QImage:
 # main window
 # ==========================================================================
 class MainWindow(QtWidgets.QMainWindow):
+    """The decoder window: picture list, picture view, settings and diagnostics."""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Golden Record Decoder")
@@ -562,6 +567,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------- opening
     def open_dialog(self):
+        """Ask for a recording and open it."""
         start = self._qsettings.value("last_dir", str(Path.home()))
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open recording", start, "Audio (*.wav *.flac *.aif *.aiff *.w64 *.rf64);;All files (*)")
@@ -569,23 +575,28 @@ class MainWindow(QtWidgets.QMainWindow):
             self.open_file(path)
 
     def dragEnterEvent(self, e):
+        """Accept audio files dragged onto the window."""
         if e.mimeData().hasUrls():
             e.acceptProposedAction()
 
     def dropEvent(self, e):
+        """Open the first audio file dropped onto the window."""
         urls = e.mimeData().urls()
         if urls:
             self.open_file(urls[0].toLocalFile())
 
     def sync_settings(self) -> SyncSettings:
+        """The sync-detection settings as currently set in the panel."""
         return SyncSettings(template_width=self.w_tplen.value() / 100, min_score=self.w_minscore.value(),
                             edge_scale_us=self.w_edge.value())
 
     def reanalyse(self):
+        """Analyse the open file again with the current sync-detection settings."""
         if self.decoder is not None or getattr(self, "_path", None):
             self.open_file(str(self._path))
 
     def open_file(self, path: str):
+        """Open a recording and analyse it in the background."""
         self._path = Path(path)
         self._qsettings.setValue("last_dir", str(Path(path).parent))
         try:
@@ -713,6 +724,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ----------------------------------------------------------- rendering
     def schedule_render(self, reset_view: bool = False):
+        """Re-render the current picture shortly (debounced while settings change)."""
         self._reset_view = getattr(self, "_reset_view", False) or reset_view
         self._render_timer.start()
 
@@ -872,6 +884,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(f"▶ {t:8.2f} s   ·   {p.name}   ·   line {max(0, min(line, n))}")
 
     def closeEvent(self, e):
+        """Stop playback and background work before closing."""
         if self.player:
             self.player.stop()
         super().closeEvent(e)
@@ -1000,6 +1013,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ---------------------------------------------------------- calibrate
     def calibrate_circle(self):
+        """Set the aspect ratio that makes the calibration circle round."""
         if not self.rendered:
             return
         try:
@@ -1016,6 +1030,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return resize_columns(img, display_width(self.st, img.shape[1]))
 
     def export_current(self):
+        """Save the picture on screen as a PNG with square pixels."""
         if self.rendered is None:
             return
         name = self.current.name + ("_colour" if self.colour else "")
@@ -1027,6 +1042,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(f"saved {path}")
 
     def export_csv(self):
+        """Save the per-line timing of the picture on screen as CSV."""
         if self.rendered is None:
             return
         start = str(Path(self._qsettings.value("last_export", str(Path.home()))) / f"{self.current.name}_timing.csv")
@@ -1036,6 +1052,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(f"saved {path}")
 
     def export_all(self):
+        """Decode every picture and save them, with timing CSVs, to a folder."""
         if not self.decoder:
             return
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Export all pictures to",
@@ -1065,6 +1082,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 def run(argv=None) -> int:
+    """Start the app; a recording given on the command line is opened at once."""
     argv = sys.argv if argv is None else argv
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(argv)
     app.setStyle("Fusion")

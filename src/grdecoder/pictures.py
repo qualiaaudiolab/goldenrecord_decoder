@@ -1,21 +1,28 @@
 """
-pictures.py - locating the 512-line pictures inside runs of sync pulses.
+pictures.py - locating the pictures inside runs of sync pulses.
 
 A run of regular sync pulses (see sync.track_lines) is longer than the
 picture it carries: there are ~100 lines of framing before the picture and
-blank lines after it. Just before every picture sits a start marker: ~21
-lines of high-contrast diagonal hatching. The picture's first line is the
-line right after the marker; that is the precise anchor (`find_start_marker`).
-If no marker is found (damaged, or cut off by the start of the file), the
-picture is placed on the stretch of lines whose blanking structure matches
-(`picture_mask`, `find_picture_blocks`, `place_picture`). Picture lines are recognisable because their blanking intervals - the
-first ~16 % and last ~10 % of every line - all share the same structure
-(sync pulse, black/white framing bars). Lines outside the picture do not.
+blank lines after it.
 
-Method: draw every line of the run at low resolution, take the median line
-of the middle of the run as reference, correlate each line's blanking parts
-with it, and keep the longest stretch of lines that clearly matches. That
-stretch is then centred on the nominal 512 lines.
+1. Which lines belong to a picture (`picture_mask`, `find_picture_blocks`).
+   Picture lines are recognisable because their blanking intervals - the
+   first ~16 % and last ~10 % of every line - all share the same structure
+   (sync pulse, black/white framing bars); lines outside the picture do not.
+   Every line of the run is drawn at low resolution, compared with the
+   median line of its own parity, and the long stretches of lines that
+   clearly match are kept.
+
+2. Where exactly the picture starts (`find_start_marker`). Just before every
+   picture sits a start marker: ~21 lines of high-contrast diagonal
+   hatching. The picture's first line is the line right after it. From
+   there the decoder keeps the whole framed area, which on the master tape
+   is 530-541 lines (the cover's 512 plus a border); see
+   pipeline.Decoder._analyse_channel.
+
+3. Fallback (`place_picture`): if no marker is found (damaged, or cut off by
+   the start of the file), the nominal 512 lines are centred on the
+   matching stretch.
 """
 
 from __future__ import annotations
