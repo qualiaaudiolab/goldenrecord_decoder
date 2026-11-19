@@ -178,7 +178,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # real-time playback
         self.player: Player | None = None
-        self._play_timer = QtCore.QTimer(self, interval=33)
+        self._play_timer = QtCore.QTimer(self, interval=16)  # ~60 updates per second
         self._play_timer.timeout.connect(self._play_tick)
         self._reveal: int | None = None          # columns shown while playing (None = all)
         self._col_times: np.ndarray | None = None  # file time (s) of each column's line start
@@ -272,8 +272,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self.line_marker = pg.InfiniteLine(angle=90, pen=pg.mkPen(theme.ACCENT, width=1, style=QtCore.Qt.DashLine))
         self.line_marker.setVisible(False)
         self.vb.addItem(self.line_marker)
+        # During playback the part of the picture not yet reached is covered
+        # by a dark rectangle; moving it is much cheaper than redrawing the image.
+        self.cover = QtWidgets.QGraphicsRectItem()
+        self.cover.setBrush(pg.mkBrush(theme.BG))
+        self.cover.setPen(pg.mkPen(None))
+        self.cover.setZValue(5)
+        self.cover.setVisible(False)
+        self.vb.addItem(self.cover)
+        self.line_marker.setZValue(6)
         self.vb.scene().sigMouseClicked.connect(self._image_clicked)
         lay.addWidget(self.view, 1)
+        # Live signal strip: the waveform of the line being played (or the
+        # line clicked), the way an oscilloscope on the decoder's input would show it.
+        self.live = pg.PlotWidget()
+        self.live.setBackground(theme.BG)
+        self.live.setFixedHeight(110)
+        self.live.hideAxis("left")
+        self.live.hideAxis("bottom")
+        self.live.setMouseEnabled(False, False)
+        self.live.setMenuEnabled(False)
+        self.live.hideButtons()
+        self.live.setXRange(-0.03, 1.03, padding=0)
+        self.live_curve = self.live.plot([], [], pen=pg.mkPen(theme.TRACE, width=1.4))
+        self._live_range: tuple[float, float] | None = None
+        lay.addWidget(self.live)
         self.setCentralWidget(w)
 
     def _build_picture_dock(self):
@@ -791,11 +814,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if img is None:
             return
         self._disp_full = img
-        self._apply_reveal()
+        self.image_item.setImage(img, levels=(0, 1), autoLevels=False)
         h, w = img.shape[:2]
         sx = self.st.height * self.st.aspect / LINES_PER_PICTURE  # make pixels the right shape
         self.image_item.setTransform(QtGui.QTransform.fromScale(sx, self.st.height / h))
         self._sx = sx
+        self._apply_reveal()
+        self._live_range = None
+        self._update_live()
         p = self.current
         r = self.rendered
         mode = "UNCORRECTED (fixed speed, no corrections)" if self.act_compare.isChecked() else \
@@ -806,14 +832,46 @@ class MainWindow(QtWidgets.QMainWindow):
                              f"{p.t_start:.3f}–{p.t_end:.3f} s   ·   {mode}{col}")
 
     def _apply_reveal(self):
-        """Show the picture, blanking the columns not yet reached by playback."""
+        """Cover the columns not yet reached by playback (nothing is covered when stopped)."""
         img = self._disp_full
-        if img is None:
+        if img is None or self._reveal is None:
+            self.cover.setVisible(False)
             return
-        if self._reveal is not None:
-            img = img.copy()
-            img[:, max(0, min(self._reveal, img.shape[1])) :] = 0.04
-        self.image_item.setImage(img, levels=(0, 1), autoLevels=False)
+        w = img.shape[1]
+        col = max(0, min(self._reveal, w))
+        sx = getattr(self, "_sx", 1.0)
+        self.cover.setRect(col * sx, 0, (w - col) * sx + 1, self.st.height)
+        self.cover.setVisible(col < w)
+
+    def _update_live(self, col: int | None = None):
+        """Draw the waveform of one line of the current picture in the live strip."""
+        r = self.rendered
+        if r is None or self.decoder is None:
+            self.live_curve.setData([], [])
+            return
+        n = r.lines.stop - r.lines.start
+        if col is None:
+            k = self.selected_line if self.selected_line is not None else (r.lines.start + r.lines.stop) // 2
+            col = k - r.lines.start
+        col = max(0, min(col, n - 1))
+        t0 = float(r.timebase(np.array([r.lines.start + col], dtype=float))[0])
+        a = int(t0 - 0.03 * r.period_samples)
+        b = int(t0 + 1.03 * r.period_samples)
+        x = self.decoder.source.read(r.picture.channel, a, b)
+        if len(x) > 1600:  # keep the peaks of short pulses when thinning
+            m = len(x) // 800
+            x = x[: m * 800].reshape(800, m)
+            x = np.where(np.arange(800) % 2 == 0, x.max(1), x.min(1))
+        u = np.linspace(-0.03, 1.03, len(x))
+        self.live_curve.setData(u, x)
+        if self._live_range is None:
+            # one vertical scale per picture, so the trace does not jump about
+            s = self.decoder.source.read(r.picture.channel, int(r.timebase(np.array([float(r.lines.start)]))[0]),
+                                         int(r.timebase(np.array([float(r.lines.stop - 1)]))[0]))[::7]
+            lo, hi = np.percentile(s, [0.2, 99.8]) if len(s) else (-1.0, 1.0)
+            pad = 0.08 * (hi - lo + 1e-9)
+            self._live_range = (float(lo - pad), float(hi + pad))
+            self.live.setYRange(*self._live_range, padding=0)
 
     # ----------------------------------------------------------- playback
     def _volume_changed(self, v: int):
@@ -844,6 +902,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._reveal = None
             self.act_play.setText("▶  Play")
             self.line_marker.setVisible(False)
+            self.live_curve.setPen(pg.mkPen(theme.TRACE, width=1.4))
             self._apply_reveal()
 
     def _play_tick(self):
@@ -876,8 +935,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if 0 <= col < n:
             self.line_marker.setPos((col + 0.5) * getattr(self, "_sx", 1.0))
             self.line_marker.setVisible(True)
+            self.live_curve.setPen(pg.mkPen(theme.ACCENT, width=1.4))
+            self._update_live(col)
             self._tick += 1
-            if self._tick % 4 == 0:  # live line scope, ~8 updates per second
+            if self._tick % 6 == 0:  # diagnostics scope, ~10 updates per second
                 self.selected_line = r.lines.start + col
                 self._update_scope()
         line = col - (r.picture.first_line - r.lines.start)
@@ -969,6 +1030,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.line_marker.setPos((col + 0.5) * self._sx)
             self.line_marker.setVisible(True)
             self._update_scope()
+            self._update_live()
 
     def _update_scope(self):
         """Raw signal of the selected line, with the regions the decoder uses."""

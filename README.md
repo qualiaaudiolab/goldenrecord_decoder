@@ -110,8 +110,9 @@ grdecoder                      # start the app
 5. **▶ Play** (or the space bar) plays the recording from the selected
    picture. You hear the signal (both channels, resampled to 48 kHz for
    the sound card) while the picture is drawn line by line in step with it,
-   and the line scope follows along. At the end of a picture, playback
-   moves on to the next one on the same channel.
+   and the signal strip under the picture shows the waveform of the line
+   being played. At the end of a picture, playback moves on to the next one
+   on the same channel. When stopped, the strip shows the line you click.
 6. **Export picture** saves a 16-bit PNG with square pixels. **Export all…**
    saves every picture plus a per-line timing CSV for each.
 
