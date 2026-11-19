@@ -16,7 +16,8 @@ The decoder was developed on a 384 kHz / 32-bit float transfer of the 1977
 master tape. It works with any WAV/FLAC recording of the picture section
 (other sample rates, mono or stereo, from tape or from a disc). The sync
 detector learns the pulse shape from the recording itself, so 44.1 kHz or
-band-limited copies decode as well: on the 90 s excerpt all 26 pictures are
+band-limited copies decode as well: in the first 90 s of the master-tape
+transfer all 26 pictures are
 found at 384 kHz, after a 20 kHz low-pass and at 44.1 kHz, with sync timing
 noise of 1.8, 2.0 and 2.1 µs.
 

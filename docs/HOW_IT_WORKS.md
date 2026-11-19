@@ -2,10 +2,18 @@
 
 This document explains what the picture signal looks like, what goes wrong
 with it on tape, and what each processing step does about it. Every number
-below was measured on a 384 kHz / 32-bit float stereo transfer of the 1977
-master tape of the picture section (four excerpts: the first 90 s, 30 s and
-112 s from the middle, and the last 88 s). Where something is a hypothesis rather than a measurement,
-it says so.
+below was measured on the transfer of the picture section's 1977 master reel
+that Ozma Records made in 2017 for the Golden Record reissue: a 384 kHz /
+32-bit float stereo WAV file, 474 s long, which is not distributed with this
+project. Four sections of it were analysed:
+
+* **the start**: the first 90 s (lead-in tones, then the first 26 pictures,
+  from the calibration circle to Jupiter, both channels);
+* **two sections from the middle**, 30 s and 112 s long;
+* **the end**: the last 88 s (the last pictures, up to the violin with the
+  Cavatina score, then silence).
+
+Where something is a hypothesis rather than a measurement, it says so.
 
 Contents
 
@@ -94,7 +102,7 @@ WAV ──► find candidates ──► line period ──► learn templates �
 | Find pictures | `pictures.py` | compares the edges in the blanking part of every line with the median of its own parity (picture lines share the framing structure, other lines do not); the picture starts on the line right after the hatched start marker and runs to the end of the matching stretch |
 | Render | `pipeline.Decoder.render`, `render.py` | the steps described below |
 
-Analysis of the 90 s excerpt (both channels) takes ~14 s; rendering one
+Analysing 90 s of the recording (both channels) takes ~14 s; rendering one
 picture at 768 rows ~0.3 s.
 
 ### Other sample rates and band-limited copies
@@ -105,7 +113,7 @@ smeared over more than that and picture edges look just as sync-like. That
 is why the templates are learned from the recording itself and are longer
 (4 % of a line, which includes the pulse's flat top or the beginning of the
 blanking that follows), and why the tracker prefers runs of pulses that show
-the stagger. Measured on the 90 s excerpt with default settings:
+the stagger. Measured on the start section (first 90 s) with default settings:
 
 | Copy | Pictures | Pulses predicted (not found) | Sync timing noise |
 |---|---|---|---|
@@ -166,7 +174,7 @@ bit is measurement noise (~0.7 sample per pulse). 40 Hz is the default.
 
 Both tracks pass the same replay head at the same moment, so errors made by
 the **replay** machine during the transfer are identical on both. Measured on
-the 90 s, 30 s and 112 s excerpts (destaggered sync times, each track's own
+the start and the two middle sections (destaggered sync times, each track's own
 linear trend removed):
 
 * **Lead-in** (before the first picture, the same signal on both tracks):
@@ -262,7 +270,7 @@ tape would track wow and flutter and could be used to correct them.
 
 It is not on the tape:
 
-* Its frequency is **76,807.05 Hz** in both excerpts (agreeing within 0.01 Hz)
+* Its frequency is **76,807.05 Hz** in the start and the 30 s middle section (agreeing within 0.01 Hz)
   and stays within about ±1 ppm over time. A tone on tape would wander by
   hundreds of ppm with the tape speed.
 * The phase of the tone predicts timing errors of ±0.5 µs; the sync pulses
